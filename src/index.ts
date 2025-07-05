@@ -27,8 +27,8 @@ export const isThrottleOptions = (
 
 export class LastWinsAndCancelsPrevious<R = unknown> {
   private controller?: AbortController;
-  private resultPromise!: Promise<R | undefined>;
-  private resultPromiseResolve?: (value: R | undefined) => void;
+  private resultPromise!: Promise<R> | undefined;
+  private resultPromiseResolve?: (value: R) => void;
   private resultPromiseReject?: (reason?: any) => void;
 
   private readonly delay: number;
@@ -38,7 +38,6 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private debouncedOrThrottledRun?: (...args: any[]) => any;
 
   constructor(options?: LastWinsAndCancelsPreviousOptions) {
-    this.resetResultPromise();
     if (!options) {
       this.delay = 0;
       this.leading = true;
@@ -77,15 +76,24 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   }
 
   private resetResultPromise() {
-    this.resultPromise = new Promise<R | undefined>((resolve, reject) => {
+    this.resultPromise = new Promise<R>((resolve, reject) => {
       this.resultPromiseResolve = resolve;
       this.resultPromiseReject = reject;
     });
   }
 
+  private clearResultPromise() {
+    this.resultPromiseResolve = undefined;
+    this.resultPromiseReject = undefined;
+    this.resultPromise = undefined;
+  }
+
   public run<T extends R>(
     task: (signal: AbortSignal) => Promise<T>
   ): Promise<T | undefined> {
+    if (!this.resultPromise) {
+      this.resetResultPromise();
+    }
     if (!this.debouncedOrThrottledRun) {
       // Без debounce/throttle — просто вызов _run
       return this._run(task);
@@ -105,23 +113,25 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   ): Promise<T | undefined> {
     if (this.controller) this.controller.abort();
     this.controller = new AbortController();
-    this.resetResultPromise();
     const signal = this.controller.signal;
     return task(signal)
-    .then((result) => {
-      if (!signal.aborted) this.resultPromiseResolve?.(result);
-      return result;
-    })
-    .catch((err) => {
-      if (!signal.aborted) {
-        this.resultPromiseReject?.(err);
+      .then((result) => {
+        if (!signal.aborted) {
+          this.resultPromiseResolve?.(result);
+          this.clearResultPromise();
+        }
+        return result;
+      })
+      .catch((err) => {
+        if (!signal.aborted) {
+          this.resultPromiseReject?.(err);
+          this.clearResultPromise();
+        }
         throw err;
-      }
-      return undefined;
-    });
+      });
   }
 
-  public get result(): Promise<R | undefined> {
+  public get result(): Promise<R> | undefined {
     return this.resultPromise;
   }
 }
