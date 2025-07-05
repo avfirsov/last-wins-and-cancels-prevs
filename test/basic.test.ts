@@ -111,6 +111,7 @@ describe("LastWinsAndCancelsPrevious", () => {
     resolve2!(22);
     expect(await p1).toBe(11);
     expect(await p2).toBe(22);
+    expect(await queue.result).toBe(33);
   });
 });
 
@@ -142,6 +143,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     await vi.runAllTimersAsync();
     await vi.runAllTicks();
     expect(log).toEqual([3]);
+    expect(await queue.result).toBe(3);
     expect(await r1).toBeUndefined();
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
@@ -161,6 +163,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     await vi.runAllTimersAsync();
     await vi.runAllTicks();
     await Promise.all([r1, r2, r3]);
+    expect(await queue.result).toBe(3);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
@@ -181,6 +184,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
 
     await vi.runAllTicks();
     expect(log).toEqual([1, 3]);
+    expect(await queue.result).toBe(3);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
@@ -212,6 +216,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     vi.advanceTimersByTime(400);
 
     await vi.runAllTicks();
+    expect(await queue.result).toBe(3);
     expect(log).toEqual([1, 3]);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
@@ -232,6 +237,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
 
     await vi.runAllTimersAsync();
     await vi.runAllTicks();
+    expect(await queue.result).toBe(3);
     expect(await r1).toBeUndefined();
     expect(await r2).toBe(2);
     expect(await r3).toBe(3);
@@ -254,12 +260,13 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
 
     await vi.runAllTimersAsync();
     await vi.runAllTicks();
+    expect(await queue.result).toBe(4);
     expect(await r1).toBe(1);
     expect(await r2).toBe(2);
-    expect(await r3).toBeUndefined();
+    expect(await r3).toBe(3);
     expect(await r4).toBe(4);
     expect(await queue.result).toBe(4);
-    expect(log).toEqual([1, 2, 4]);
+    expect(log).toEqual([1, 2, 3, 4]);
   });
 
   it("throttle leading=false, trailing=false: ничего не вызывает", async () => {

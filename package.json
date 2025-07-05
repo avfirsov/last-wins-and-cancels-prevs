@@ -10,7 +10,13 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/lodash.debounce": "^4.0.9",
+    "@types/lodash.throttle": "^4.1.9",
     "typescript": "^5.0.0",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "lodash.debounce": "^4.0.8",
+    "lodash.throttle": "^4.1.1"
   }
 }
