@@ -20,6 +20,8 @@ jobs:
         run: npm ci
       - name: TypeScript strict check
         run: npx tsc --noEmit --strict
+      - name: Install vitest
+        run: npm install --save-dev vitest @vitest/coverage-v8
       - name: Run tests
         run: npx vitest run --coverage
       - name: Upload coverage to Codecov
