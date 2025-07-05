@@ -346,8 +346,50 @@ describe("result consistency", () => {
     });
     expect(result).not.toBeUndefined();
     queue.run(() => new Promise<number>((r) => {}));
-    const lastPromise = queue.run(
-      () =>
+    const lastPromise = queue.run(() => new Promise<number>((r) => { resolveLast = r; }));
+    await vi.advanceTimersByTimeAsync(400);
+    await vi.runAllTimersAsync();
+    await vi.runAllTicks();
+    // Пока задача не завершена
+    expect(resultResolved).toBe(false);
+    // Завершаем задачу
+    resolveLast!(42);
+    await vi.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+    expect(resultResolved).toBe(true);
+    expect(await result).toBe(42);
+    expect(await lastPromise).toBe(42);
+  });
+
+  it("result does not resolve until the last run is executed (throttle leading)", async () => {
+    const queue = new LastWinsAndCancelsPrevious<number>({
+      throttleMs: 300,
+      leading: true,
+      trailing: false,
+    });
+    expect(queue.result).toBeUndefined();
+    let resolve1: (v: number) => void;
+    let resolve2: (v: number) => void;
+    let resultResolved = false;
+    const p1 = queue.run(() => new Promise<number>((r) => { resolve1 = r; }));
+    const result = queue.result;
+    expect(result).not.toBeUndefined();
+    result!.then(() => {
+      resultResolved = true;
+    });
+    vi.advanceTimersByTime(350);
+    const p2 = queue.run(() => new Promise<number>((r) => { resolve2 = r; }));
+    expect(queue.result).toBe(result);
+    // Complete the first task — result should not resolve, because throttle did not allow the second
+    resolve1!(1);
+    await Promise.resolve();
+    expect(resultResolved).toBe(false);
+    // Now complete the second (which should not have been called)
+    resolve2!(2);
+    expect(await p1).toBe(1);
+    expect(await p2).toBe(2);
+    expect(await result).toBe(2);
+  });
 
 it("result does not resolve until the last run is executed (throttle leading)", async () => {
 const queue = new LastWinsAndCancelsPrevious<number>({
