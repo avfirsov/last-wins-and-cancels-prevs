@@ -1,5 +1,9 @@
 # last-wins-and-cancels-prevs
 
+![CI](https://github.com/avfirsov/last-wins-and-cancels-prevs/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/avfirsov/last-wins-and-cancels-prevs/branch/main/graph/badge.svg)](https://codecov.io/gh/avfirsov/last-wins-and-cancels-prevs)
+![TypeScript](https://img.shields.io/badge/types-100%25%20strict-blue?style=flat-square&logo=typescript)
+
 Минималистичная асинхронная очередь задач, где выполняется только последняя задача, а все предыдущие автоматически отменяются через `AbortController`. Поддерживает debounce/throttle-режимы и гарантирует, что `.result` всегда отражает результат последней завершённой задачи.
 
 ---
