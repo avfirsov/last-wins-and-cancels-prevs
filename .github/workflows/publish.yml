@@ -1,0 +1,44 @@
+name: Publish to npm
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org/'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Get commit message
+        id: commitmsg
+        run: echo "msg<<EOF" >> $GITHUB_OUTPUT && git log -1 --pretty=%B >> $GITHUB_OUTPUT && echo "EOF" >> $GITHUB_OUTPUT
+      - name: Extract version from commit message
+        id: version
+        run: |
+          msg="${{ steps.commitmsg.outputs.msg }}"
+          if [[ "$msg" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          fi
+      - name: Set package version
+        run: |
+          if [ -n "${{ steps.version.outputs.version }}" ]; then
+            npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+          else
+            npm version minor --no-git-tag-version
+          fi
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
