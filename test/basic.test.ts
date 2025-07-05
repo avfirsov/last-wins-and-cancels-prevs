@@ -113,3 +113,154 @@ describe("LastWinsAndCancelsPrevious", () => {
     expect(await p2).toBe(22);
   });
 });
+
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const makeTask = (value: number, log: number[], delay = 0) =>
+    async () => {
+      await wait(delay);
+      log.push(value);
+      return value;
+    };
+
+  it("debounce trailing=true (по умолчанию): вызывает только после паузы", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300 });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(100);
+    const r3 = queue.run(makeTask(3, log));
+    vi.advanceTimersByTime(400);
+
+    await vi.runAllTicks();
+    expect(log).toEqual([3]);
+    expect(await r1).toBeUndefined();
+    expect(await r2).toBeUndefined();
+    expect(await r3).toBe(3);
+    expect(await queue.result).toBe(3);
+  });
+
+  it("debounce leading=true: вызывает сразу, не в конце", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300, leading: true, trailing: false });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(400);
+    const r3 = queue.run(makeTask(3, log));
+
+    await Promise.all([r1, r2, r3]);
+    expect(log).toEqual([1, 3]);
+    expect(await r1).toBe(1);
+    expect(await r2).toBeUndefined();
+    expect(await r3).toBe(3);
+    expect(await queue.result).toBe(3);
+  });
+
+  it("debounce leading + trailing: вызывает дважды — в начале и в конце", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300, leading: true, trailing: true });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(200);
+    const r3 = queue.run(makeTask(3, log));
+    vi.advanceTimersByTime(400);
+
+    await vi.runAllTicks();
+    expect(log).toEqual([1, 3]);
+    expect(await r1).toBe(1);
+    expect(await r2).toBeUndefined();
+    expect(await r3).toBe(3);
+    expect(await queue.result).toBe(3);
+  });
+
+  it("debounce leading=false, trailing=false: не вызывает ничего", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300, leading: false, trailing: false });
+
+    const result = await queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(500);
+
+    expect(result).toBeUndefined();
+    expect(log).toEqual([]);
+  });
+
+  it("throttle leading=true: вызывает один раз в интервал", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ throttleMs: 300, leading: true, trailing: false });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(200);
+    const r3 = queue.run(makeTask(3, log));
+    vi.advanceTimersByTime(400);
+
+    await vi.runAllTicks();
+    expect(log).toEqual([1, 3]);
+    expect(await r1).toBe(1);
+    expect(await r2).toBeUndefined();
+    expect(await r3).toBe(3);
+    expect(await queue.result).toBe(3);
+  });
+
+  it("throttle trailing=true: вызывает в конце интервала", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ throttleMs: 300, leading: false, trailing: true });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(300);
+    const r3 = queue.run(makeTask(3, log));
+    vi.advanceTimersByTime(300);
+
+    await vi.runAllTicks();
+    expect(log).toEqual([2, 3]);
+    expect(await r1).toBeUndefined();
+    expect(await r2).toBe(2);
+    expect(await r3).toBe(3);
+    expect(await queue.result).toBe(3);
+  });
+
+  it("throttle leading + trailing: вызывает дважды на интервал", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ throttleMs: 300, leading: true, trailing: true });
+
+    const r1 = queue.run(makeTask(1, log));
+    vi.advanceTimersByTime(100);
+    const r2 = queue.run(makeTask(2, log));
+    vi.advanceTimersByTime(200);
+    const r3 = queue.run(makeTask(3, log));
+    vi.advanceTimersByTime(400);
+    const r4 = queue.run(makeTask(4, log));
+    vi.advanceTimersByTime(400);  
+
+    await vi.runAllTicks();
+    expect(log).toEqual([1, 2, 4]);
+    expect(await r1).toBe(1);
+    expect(await r2).toBe(2);
+    expect(await r3).toBeUndefined();
+    expect(await r4).toBe(4);
+    expect(await queue.result).toBe(4);
+  });
+
+  it("throttle leading=false, trailing=false: ничего не вызывает", async () => {
+    const log: number[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>({ throttleMs: 300, leading: false, trailing: false });
+
+    const r = await queue.run(makeTask(1, log));
+    expect(r).toBeUndefined();
+    expect(log).toEqual([]);
+  });
+});
