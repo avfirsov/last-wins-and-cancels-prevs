@@ -33,6 +33,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private resultPromiseReject?: (reason?: any) => void;
   private lastInvokeTime = 0;
   private timeout?: ReturnType<typeof setTimeout>;
+  private pendingResolves: Array<(v: any) => void> = [];
 
   private readonly isDebounce: boolean;
   private readonly delay: number;
@@ -101,7 +102,11 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
 
     if (this.isDebounce) {
       const shouldCallNow = this.leading && !this.timeout;
-      if (this.timeout) clearTimeout(this.timeout);
+      if (this.timeout) {
+        clearTimeout(this.timeout);
+        this.pendingResolves.forEach((r) => r(undefined));
+        this.pendingResolves = [];
+      }
 
       if (shouldCallNow) {
         const result = invoke();
@@ -112,15 +117,19 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
       }
 
       if (this.trailing) {
+        // trailing вызывается только если был хотя бы один вызов в окне
         return new Promise((resolve) => {
+          this.pendingResolves = [];
+          this.pendingResolves.push(resolve);
           this.timeout = setTimeout(() => {
             this.timeout = undefined;
             resolve(invoke());
+            this.pendingResolves = [];
           }, this.delay);
         });
       }
 
-      // leading false, trailing false
+      // Если ни leading, ни trailing — сразу резолвим undefined
       return Promise.resolve(undefined);
     } else {
       const timeSinceLast = now - this.lastInvokeTime;
@@ -132,16 +141,25 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
       }
 
       if (this.trailing) {
+        // trailing вызывается только если был хотя бы один вызов в окне
+        if (this.timeout) {
+          clearTimeout(this.timeout);
+          this.pendingResolves.forEach((r) => r(undefined));
+          this.pendingResolves = [];
+        }
         return new Promise((resolve) => {
-          if (this.timeout) clearTimeout(this.timeout);
+          this.pendingResolves = [];
+          this.pendingResolves.push(resolve);
           this.timeout = setTimeout(() => {
             this.lastInvokeTime = Date.now();
             this.timeout = undefined;
             resolve(invoke());
+            this.pendingResolves = [];
           }, this.delay - timeSinceLast);
         });
       }
 
+      // Если ни leading, ни trailing — сразу резолвим undefined
       return Promise.resolve(undefined);
     }
   }

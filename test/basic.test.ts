@@ -139,6 +139,7 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const r3 = queue.run(makeTask(3, log));
     vi.advanceTimersByTime(400);
 
+    await vi.runAllTimersAsync();
     await vi.runAllTicks();
     expect(log).toEqual([3]);
     expect(await r1).toBeUndefined();
@@ -156,13 +157,15 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const r2 = queue.run(makeTask(2, log));
     vi.advanceTimersByTime(400);
     const r3 = queue.run(makeTask(3, log));
-
+    vi.advanceTimersByTime(100);
+    await vi.runAllTimersAsync();
+    await vi.runAllTicks();
     await Promise.all([r1, r2, r3]);
-    expect(log).toEqual([1, 3]);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
     expect(await queue.result).toBe(3);
+    expect(log).toEqual([1, 3]);
   });
 
   it("debounce leading + trailing: вызывает дважды — в начале и в конце", async () => {
@@ -191,6 +194,8 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const result = await queue.run(makeTask(1, log));
     vi.advanceTimersByTime(500);
 
+    await vi.runAllTimersAsync();
+    await vi.runAllTicks();
     expect(result).toBeUndefined();
     expect(log).toEqual([]);
   });
@@ -225,12 +230,13 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const r3 = queue.run(makeTask(3, log));
     vi.advanceTimersByTime(300);
 
+    await vi.runAllTimersAsync();
     await vi.runAllTicks();
-    expect(log).toEqual([2, 3]);
     expect(await r1).toBeUndefined();
     expect(await r2).toBe(2);
     expect(await r3).toBe(3);
     expect(await queue.result).toBe(3);
+    expect(log).toEqual([2, 3]);
   });
 
   it("throttle leading + trailing: вызывает дважды на интервал", async () => {
@@ -246,13 +252,14 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const r4 = queue.run(makeTask(4, log));
     vi.advanceTimersByTime(400);  
 
+    await vi.runAllTimersAsync();
     await vi.runAllTicks();
-    expect(log).toEqual([1, 2, 4]);
     expect(await r1).toBe(1);
     expect(await r2).toBe(2);
     expect(await r3).toBeUndefined();
     expect(await r4).toBe(4);
     expect(await queue.result).toBe(4);
+    expect(log).toEqual([1, 2, 4]);
   });
 
   it("throttle leading=false, trailing=false: ничего не вызывает", async () => {
@@ -260,6 +267,8 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle поведение", 
     const queue = new LastWinsAndCancelsPrevious<number>({ throttleMs: 300, leading: false, trailing: false });
 
     const r = await queue.run(makeTask(1, log));
+    await vi.runAllTimersAsync();
+    await vi.runAllTicks();
     expect(r).toBeUndefined();
     expect(log).toEqual([]);
   });
