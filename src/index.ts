@@ -31,6 +31,7 @@ export type LastWinsAndCancelsPreviousHook<R> = (args: {
   isSeriesEnd: boolean;
 }) => void;
 
+export type Unsub = () => void;
 
 /**
  * Task queue with previous cancellation and event hooks support.
@@ -55,7 +56,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   /**
    * Subscribe to abort events (any task, not just result)
    */
-  public onAborted(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
+  public onAborted(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
     this.onAbortedHooks.push(cb);
     return () => {
       const idx = this.onAbortedHooks.indexOf(cb);
@@ -65,7 +66,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   /**
    * Subscribe to error events (any task, not just result)
    */
-  public onError(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
+  public onError(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
     this.onErrorHooks.push(cb);
     return () => {
       const idx = this.onErrorHooks.indexOf(cb);
@@ -75,7 +76,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   /**
    * Subscribe to completion events (any task, not just result)
    */
-  public onComplete(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
+  public onComplete(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
     this.onCompleteHooks.push(cb);
     return () => {
       const idx = this.onCompleteHooks.indexOf(cb);
@@ -83,16 +84,34 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
     };
   }
   /**
-   * Subscribe to series start events (any task, not just result)
+   * Subscribe to series start events
    */
-  public onSeriesStarted(cb: () => void): () => void {
+  public onSeriesStarted(cb: () => void): Unsub {
     this.onSeriesStartedHooks.push(cb);
     return () => {
       const idx = this.onSeriesStartedHooks.indexOf(cb);
       if (idx !== -1) this.onSeriesStartedHooks.splice(idx, 1);
     };
   }
-
+  /**
+   * Subscribe to series end events
+   */
+  public onSeriesEnded(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
+    const unsubComplete = this.onComplete((args) => {
+      if (args.isSeriesEnd) cb(args);
+    });
+    const unsubError = this.onError((args) => {
+      if (args.isSeriesEnd) cb(args);
+    });
+    const unsubAborted = this.onAborted((args) => {
+      if (args.isSeriesEnd) cb(args);
+    });
+    return () => {
+      unsubComplete();
+      unsubError();
+      unsubAborted();
+    };
+  }
   /**
    * Forcefully aborts the current winning task (and fires hooks)
    */
@@ -247,9 +266,11 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
         if (!signal.aborted) {
           this.resultPromiseReject?.(err);
           // After error — the series ends
+          this.fireError(err, signal, true);
           this.clearResultPromise();
+          throw err;
         }
-        this.fireError(err, signal, true);
+        this.fireError(err, signal, false);
         throw err;
       });
   }

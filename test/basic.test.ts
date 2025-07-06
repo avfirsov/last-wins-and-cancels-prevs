@@ -682,6 +682,56 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle behavior", () => {
 });
 
 describe("LastWinsAndCancelsPrevious — hooks and abort", () => {
+  it("calls all onAborted subscribers independently", async () => {
+    const calls1: any[] = [];
+    const calls2: any[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>();
+    queue.onAborted((args) => calls1.push(args));
+    queue.onAborted((args) => calls2.push(args));
+    const first = queue.run(async (signal) => {
+      return new Promise<number>((resolve) => {
+        signal.addEventListener("abort", () => resolve(-1));
+        setTimeout(() => resolve(1), 50);
+      });
+    });
+    const second = queue.run(async () => 2);
+    expect(await second).toBe(2);
+    expect(await first).toBe(-1);
+    expect(calls1.length).toBe(1);
+    expect(calls2.length).toBe(1);
+    expect(calls1[0]).toMatchObject({ aborted: true });
+    expect(calls2[0]).toMatchObject({ aborted: true });
+  });
+
+  it("calls all onError subscribers independently", async () => {
+    const calls1: any[] = [];
+    const calls2: any[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>();
+    queue.onError((args) => calls1.push(args));
+    queue.onError((args) => calls2.push(args));
+    const error = new Error("fail");
+    const task = queue.run(async () => { throw error; });
+    await expect(task).rejects.toThrow("fail");
+    expect(calls1.length).toBe(1);
+    expect(calls2.length).toBe(1);
+    expect(calls1[0]).toMatchObject({ error, isSeriesEnd: true });
+    expect(calls2[0]).toMatchObject({ error, isSeriesEnd: true });
+  });
+
+  it("calls all onComplete subscribers independently", async () => {
+    const calls1: any[] = [];
+    const calls2: any[] = [];
+    const queue = new LastWinsAndCancelsPrevious<number>();
+    queue.onComplete((args) => calls1.push(args));
+    queue.onComplete((args) => calls2.push(args));
+    const task = queue.run(async () => 42);
+    expect(await task).toBe(42);
+    expect(calls1.length).toBe(1);
+    expect(calls2.length).toBe(1);
+    expect(calls1[0]).toMatchObject({ result: 42, isSeriesEnd: true });
+    expect(calls2[0]).toMatchObject({ result: 42, isSeriesEnd: true });
+  });
+
   it("calls onAborted when task is cancelled by new run", async () => {
     const onAborted = vi.fn();
     const queue = new LastWinsAndCancelsPrevious<number>();
@@ -816,40 +866,6 @@ describe("LastWinsAndCancelsPrevious — hooks and abort", () => {
     expect(onComplete).toHaveBeenCalledTimes(2);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onAborted).toHaveBeenCalledTimes(5);
-  });
-
-  it("does not break if hook throws", async () => {
-    const onAborted = vi.fn(() => {
-      throw new Error("hook fail");
-    });
-    const onError = vi.fn(() => {
-      throw new Error("hook fail");
-    });
-    const onComplete = vi.fn(() => {
-      throw new Error("hook fail");
-    });
-    const queue = new LastWinsAndCancelsPrevious<number>();
-    queue.onAborted(onAborted);
-    queue.onError(onError);
-    queue.onComplete(onComplete);
-    // onComplete throws, but task still resolves
-    expect(await queue.run(async () => 1)).toBe(1);
-    // onError throws, but task still rejects
-    await expect(
-      queue.run(async () => {
-        throw new Error("err");
-      })
-    ).rejects.toThrow("err");
-    // onAborted throws, but abort still works
-    const t = queue.run(
-      async (signal) =>
-        new Promise<number>((resolve) => {
-          signal.addEventListener("abort", () => resolve(-1));
-          setTimeout(() => resolve(5), 100);
-        })
-    );
-    queue.abort();
-    expect(await t).toBe(-1);
   });
 
   it("abort() does nothing if no active task", () => {

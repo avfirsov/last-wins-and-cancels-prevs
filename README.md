@@ -68,19 +68,23 @@ const isLoading = ref(false);
 // Create queue with 500ms debounce
 const queue = new LastWinsAndCancelsPrevious<string[]>({ debounceMs: 500 });
 
+queue.onSeriesStarted(() => {
+  isLoading.value = true;
+});
 queue.onAborted(({ isSeriesEnd }) => {
   if (isSeriesEnd) isLoading.value = false;
 });
 queue.onError(({ isSeriesEnd }) => {
   if (isSeriesEnd) isLoading.value = false;
-});
+
 queue.onComplete(({ result, isSeriesEnd }) => {
-  if (isSeriesEnd) isLoading.value = false;
-  if (result) results.value = result;
+  if (isSeriesEnd) {
+    isLoading.value = false;
+    if (result) results.value = result;
+  }
 });
 
 watch(searchQuery, (q) => {
-  isLoading.value = true;
   queue.run(async (signal) => {
     // Simulate API call with abort support
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal });
