@@ -221,7 +221,6 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
           completed = true;
           this.resultPromiseResolve?.(result);
           // After successful completion — the series ends
-          //TODO: add tests to verify fireComplete is called for every series end
           this.fireComplete(result, signal, true);
           this.clearResultPromise();
         }
