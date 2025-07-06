@@ -232,7 +232,6 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
           // After error — the series ends
           this.clearResultPromise();
         }
-        //TODO: add tests to verify that fireError is called for even cancelled tasks (if no abort signal passed)
         this.fireError(err, signal, true);
         throw err;
       });
