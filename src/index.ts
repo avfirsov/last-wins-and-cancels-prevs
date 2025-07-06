@@ -54,20 +54,32 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   /**
    * Subscribe to abort events (any task, not just result)
    */
-  public onAborted(cb: LastWinsAndCancelsPreviousHook<R>): void {
+  public onAborted(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
     this.onAbortedHooks.push(cb);
+    return () => {
+      const idx = this.onAbortedHooks.indexOf(cb);
+      if (idx !== -1) this.onAbortedHooks.splice(idx, 1);
+    };
   }
   /**
    * Subscribe to error events (any task, not just result)
    */
-  public onError(cb: LastWinsAndCancelsPreviousHook<R>): void {
+  public onError(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
     this.onErrorHooks.push(cb);
+    return () => {
+      const idx = this.onErrorHooks.indexOf(cb);
+      if (idx !== -1) this.onErrorHooks.splice(idx, 1);
+    };
   }
   /**
    * Subscribe to completion events (any task, not just result)
    */
-  public onComplete(cb: LastWinsAndCancelsPreviousHook<R>): void {
+  public onComplete(cb: LastWinsAndCancelsPreviousHook<R>): () => void {
     this.onCompleteHooks.push(cb);
+    return () => {
+      const idx = this.onCompleteHooks.indexOf(cb);
+      if (idx !== -1) this.onCompleteHooks.splice(idx, 1);
+    };
   }
 
   /**
@@ -93,9 +105,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
     isSeriesEnd: boolean
   ) {
     for (const cb of this.onAbortedHooks) {
-      try {
-        cb({ result, aborted: true, error: undefined, signal, isSeriesEnd });
-      } catch {}
+      cb({ result, aborted: true, error: undefined, signal, isSeriesEnd });
     }
   }
   /**
@@ -104,9 +114,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
    */
   private fireError(error: any, signal: AbortSignal, isSeriesEnd: boolean) {
     for (const cb of this.onErrorHooks) {
-      try {
-        cb({ error, aborted: false, result: undefined, signal, isSeriesEnd });
-      } catch {}
+      cb({ error, aborted: false, result: undefined, signal, isSeriesEnd });
     }
   }
   /**
@@ -115,9 +123,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
    */
   private fireComplete(result: R, signal: AbortSignal, isSeriesEnd: boolean) {
     for (const cb of this.onCompleteHooks) {
-      try {
-        cb({ result, aborted: false, error: undefined, signal, isSeriesEnd });
-      } catch {}
+      cb({ result, aborted: false, error: undefined, signal, isSeriesEnd });
     }
   }
 
