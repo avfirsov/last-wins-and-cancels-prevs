@@ -3,14 +3,12 @@ import throttle from "lodash.throttle";
 
 export type DebounceOptions = {
   debounceMs: number;
-  leading?: boolean;
-  trailing?: boolean;
+  edge?: "leading" | "trailing" | "both";
 };
 
 export type ThrottleOptions = {
   throttleMs: number;
-  leading?: boolean;
-  trailing?: boolean;
+  edge?: "leading" | "trailing" | "both";
 };
 
 export type LastWinsAndCancelsPreviousOptions =
@@ -25,7 +23,14 @@ export const isThrottleOptions = (
   options: LastWinsAndCancelsPreviousOptions
 ): options is ThrottleOptions => "throttleMs" in options;
 
-export type LastWinsAndCancelsPreviousHook<R> = (args: { result?: R; error?: any; aborted: boolean; signal: AbortSignal; isSeriesEnd: boolean }) => void;
+export type LastWinsAndCancelsPreviousHook<R> = (args: {
+  result?: R;
+  error?: any;
+  aborted: boolean;
+  signal: AbortSignal;
+  isSeriesEnd: boolean;
+}) => void;
+
 
 /**
  * Task queue with previous cancellation and event hooks support.
@@ -37,8 +42,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private resultPromiseReject?: (reason?: any) => void;
 
   private readonly delay: number;
-  private readonly leading: boolean;
-  private readonly trailing: boolean;
+  private edge: "leading" | "trailing" | "both";
 
   private debouncedOrThrottledRun?: (...args: any[]) => any;
 
@@ -67,7 +71,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   }
 
   /**
-   * Forcefully aborts the current task (and fires hooks)
+   * Forcefully aborts the current winning task (and fires hooks)
    */
   public abort(): void {
     if (!(this.controller && !this.controller.signal.aborted)) {
@@ -83,9 +87,15 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
    * Internal call for abort hooks
    * @param isSeriesEnd true if this is the final abort (queue is idle)
    */
-  private fireAborted(result: R | undefined, signal: AbortSignal, isSeriesEnd: boolean) {
+  private fireAborted(
+    result: R | undefined,
+    signal: AbortSignal,
+    isSeriesEnd: boolean
+  ) {
     for (const cb of this.onAbortedHooks) {
-      try { cb({ result, aborted: true, error: undefined, signal, isSeriesEnd }); } catch {}
+      try {
+        cb({ result, aborted: true, error: undefined, signal, isSeriesEnd });
+      } catch {}
     }
   }
   /**
@@ -94,7 +104,9 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
    */
   private fireError(error: any, signal: AbortSignal, isSeriesEnd: boolean) {
     for (const cb of this.onErrorHooks) {
-      try { cb({ error, aborted: false, result: undefined, signal, isSeriesEnd }); } catch {}
+      try {
+        cb({ error, aborted: false, result: undefined, signal, isSeriesEnd });
+      } catch {}
     }
   }
   /**
@@ -103,45 +115,52 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
    */
   private fireComplete(result: R, signal: AbortSignal, isSeriesEnd: boolean) {
     for (const cb of this.onCompleteHooks) {
-      try { cb({ result, aborted: false, error: undefined, signal, isSeriesEnd }); } catch {}
+      try {
+        cb({ result, aborted: false, error: undefined, signal, isSeriesEnd });
+      } catch {}
     }
   }
 
   constructor(options?: LastWinsAndCancelsPreviousOptions) {
     if (!options) {
       this.delay = 0;
-      this.leading = true;
-      this.trailing = false;
+      this.edge = "trailing";
+      this.debouncedOrThrottledRun = undefined;
       return;
     }
+
     if (isDebounceOptions(options)) {
       this.delay = options.debounceMs;
-      this.leading = options.leading ?? false;
-      this.trailing = options.trailing ?? true;
+      this.edge = options.edge ?? "trailing";
       this.debouncedOrThrottledRun = debounce(
         (task, resolve, reject, callMarker) => {
           callMarker.called = true;
           this._run(task).then(resolve, reject);
         },
         this.delay,
-        { leading: this.leading, trailing: this.trailing }
+        {
+          leading: this.edge === "leading" || this.edge === "both",
+          trailing: this.edge === "trailing" || this.edge === "both",
+        }
       );
     } else if (isThrottleOptions(options)) {
       this.delay = options.throttleMs;
-      this.leading = options.leading ?? true;
-      this.trailing = options.trailing ?? false;
+      this.edge = options.edge ?? "leading";
       this.debouncedOrThrottledRun = throttle(
         (task, resolve, reject, callMarker) => {
           callMarker.called = true;
           this._run(task).then(resolve, reject);
         },
         this.delay,
-        { leading: this.leading, trailing: this.trailing }
+        {
+          leading: this.edge === "leading" || this.edge === "both",
+          trailing: this.edge === "trailing" || this.edge === "both",
+        }
       );
     } else {
       this.delay = 0;
-      this.leading = true;
-      this.trailing = false;
+      this.edge = "trailing";
+      this.debouncedOrThrottledRun = undefined;
     }
   }
 
@@ -161,9 +180,6 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   public run<T extends R>(
     task: (signal: AbortSignal) => Promise<T>
   ): Promise<T | undefined> {
-    if (!this.resultPromise) {
-      this.resetResultPromise();
-    }
     if (!this.debouncedOrThrottledRun) {
       // No debounce/throttle — just call _run
       return this._run(task);
@@ -181,6 +197,9 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private _run<T extends R>(
     task: (signal: AbortSignal) => Promise<T>
   ): Promise<T | undefined> {
+    if (!this.resultPromise) {
+      this.resetResultPromise();
+    }
     if (this.controller) {
       // Abort previous task and fire hooks
       this.controller.abort();
@@ -196,6 +215,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
           completed = true;
           this.resultPromiseResolve?.(result);
           // After successful completion — the series ends
+          //TODO: add tests to verify fireComplete is called for every series end
           this.fireComplete(result, signal, true);
           this.clearResultPromise();
         }
@@ -205,9 +225,10 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
         if (!signal.aborted) {
           this.resultPromiseReject?.(err);
           // After error — the series ends
-          this.fireError(err, signal, true);
           this.clearResultPromise();
         }
+        //TODO: add tests to verify that fireError is called for even cancelled tasks (if no abort signal passed)
+        this.fireError(err, signal, true);
         throw err;
       });
   }

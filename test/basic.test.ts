@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LastWinsAndCancelsPrevious } from "../src";
 
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ *
+ * Больше тестов что queue.result сетиться только КОГДА запуститься task, иначе - undefined (особенно касается когда debounce/throttle с trailing без leading)
+ * Также проверить что после завершения окна сетиться обратно в undefined для разных сочетаний trailing/leading/both
+ * Также сделать тесты на кейс когда вызов run() откладывается (trailing debounce/throttle) и он должен НЕ сразу вернуть undefined, а только когда станет ясно что эту таску не вызовут, ну или наоборот - если вызовут - то вернуть значение
+ */
+
 describe("LastWinsAndCancelsPrevious", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("resolves the result of a single task", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     expect(queue.result).toBeUndefined();
@@ -87,7 +88,7 @@ describe("LastWinsAndCancelsPrevious", () => {
     expect(result).not.toBeUndefined();
     const last = queue.run(async () => 2);
     expect(queue.result).toBe(result);
-    await vi.advanceTimersByTimeAsync(100); // Продвигаем таймеры, чтобы промисы резолвились
+    await wait(100);
     expect(await last).toBe(2);
     expect(await result).toBe(2);
     expect(await first).toBe(1); // Should be undefined, since the task was cancelled
@@ -111,11 +112,21 @@ describe("LastWinsAndCancelsPrevious", () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     let reject1: (e: any) => void, resolve2: (v: number) => void;
     const error1 = new Error("fail1");
-    const task1 = queue.run(() => new Promise<number>((_, rej) => { reject1 = rej; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject1 = rej;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((res) => { resolve2 = res; }));
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((res) => {
+          resolve2 = res;
+        })
+    );
     reject1!(error1); // First task fails immediately
-    resolve2!(42);    // Second completes after
+    resolve2!(42); // Second completes after
     expect(await task2).toBe(42);
     expect(await resultPromise).toBe(42);
     await expect(task1).rejects.toThrow("fail1");
@@ -125,10 +136,20 @@ describe("LastWinsAndCancelsPrevious", () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     let reject1: (e: any) => void, resolve2: (v: number) => void;
     const error1 = new Error("fail1");
-    const task1 = queue.run(() => new Promise<number>((_, rej) => { reject1 = rej; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject1 = rej;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((res) => { resolve2 = res; }));
-    resolve2!(42);    // Second completes first
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((res) => {
+          resolve2 = res;
+        })
+    );
+    resolve2!(42); // Second completes first
     reject1!(error1); // First task fails after
     expect(await task2).toBe(42);
     expect(await resultPromise).toBe(42);
@@ -145,7 +166,9 @@ describe("LastWinsAndCancelsPrevious", () => {
           task1Reject = reject;
         })
     );
-    task1.then((v) => console.log("🚀 ~ it ~ v:", v)).catch((e) => console.log("🚀 ~ it ~ e:", e));
+    task1
+      .then((v) => console.log("🚀 ~ it ~ v:", v))
+      .catch((e) => console.log("🚀 ~ it ~ e:", e));
     const resultPromise = queue.result;
     // Start the second task, which completes successfully
     const task2 = queue.run(async () => 42);
@@ -163,9 +186,19 @@ describe("LastWinsAndCancelsPrevious", () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     let resolve1: (v: number) => void;
     const error2 = new Error("fail2");
-    const task1 = queue.run(() => new Promise<number>((res) => { resolve1 = res; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((res) => {
+          resolve1 = res;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((_, rej) => { rej(error2); }));
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          rej(error2);
+        })
+    );
     // Second task fails first
     await expect(task2).rejects.toThrow("fail2");
     resolve1!(1); // First task completes after
@@ -177,9 +210,19 @@ describe("LastWinsAndCancelsPrevious", () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     let resolve1: (v: number) => void, reject2: (e: any) => void;
     const error2 = new Error("fail2");
-    const task1 = queue.run(() => new Promise<number>((res) => { resolve1 = res; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((res) => {
+          resolve1 = res;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((_, rej) => { reject2 = rej; }));
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject2 = rej;
+        })
+    );
     resolve1!(1); // Первая задача завершается первой
     reject2!(error2); // Вторая падает после
     expect(await task1).toBe(1);
@@ -207,9 +250,19 @@ describe("LastWinsAndCancelsPrevious", () => {
     let reject1: (e: any) => void, reject2: (e: any) => void;
     const error1 = new Error("fail1");
     const error2 = new Error("fail2");
-    const task1 = queue.run(() => new Promise<number>((_, rej) => { reject1 = rej; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject1 = rej;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((_, rej) => { reject2 = rej; }));
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject2 = rej;
+        })
+    );
     reject1!(error1); // First fails first
     reject2!(error2); // Вторая падает после
     await expect(task1).rejects.toThrow("fail1");
@@ -222,9 +275,19 @@ describe("LastWinsAndCancelsPrevious", () => {
     let reject1: (e: any) => void, reject2: (e: any) => void;
     const error1 = new Error("fail1");
     const error2 = new Error("fail2");
-    const task1 = queue.run(() => new Promise<number>((_, rej) => { reject1 = rej; }));
+    const task1 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject1 = rej;
+        })
+    );
     const resultPromise = queue.result;
-    const task2 = queue.run(() => new Promise<number>((_, rej) => { reject2 = rej; }));
+    const task2 = queue.run(
+      () =>
+        new Promise<number>((_, rej) => {
+          reject2 = rej;
+        })
+    );
     reject2!(error2); // Second fails first
     reject1!(error1); // First fails after
     await expect(task1).rejects.toThrow("fail1");
@@ -287,17 +350,8 @@ describe("LastWinsAndCancelsPrevious", () => {
   });
 });
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 // --- Result consistency tests ---
 describe("result consistency", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("result does not resolve until the last run is finished (no debounce/throttle)", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     expect(queue.result).toBeUndefined();
@@ -339,46 +393,62 @@ describe("result consistency", () => {
     const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300 });
     let resolveLast: (v: number) => void;
     let resultResolved = false;
+    expect(queue.result).toBeUndefined();
     queue.run(() => new Promise<number>((r) => {}));
+    expect(queue.result).toBeUndefined();
+    queue.run(() => new Promise<number>((r) => {}));
+    expect(queue.result).toBeUndefined();
+    const lastPromise = queue.run(
+      () =>
+        new Promise<number>((r) => {
+          resolveLast = r;
+        })
+    );
+    expect(queue.result).toBeUndefined();
+    await wait(400);
     const result = queue.result;
+    expect(result).not.toBeUndefined();
     result!.then(() => {
       resultResolved = true;
     });
-    expect(result).not.toBeUndefined();
-    queue.run(() => new Promise<number>((r) => {}));
-    const lastPromise = queue.run(() => new Promise<number>((r) => { resolveLast = r; }));
-    await vi.advanceTimersByTimeAsync(400);
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
     // Пока задача не завершена
     expect(resultResolved).toBe(false);
     // Завершаем задачу
     resolveLast!(42);
-    await vi.advanceTimersByTimeAsync(50);
-    await Promise.resolve();
+    await wait(50);
     expect(resultResolved).toBe(true);
     expect(await result).toBe(42);
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await lastPromise).toBe(42);
   });
 
   it("result does not resolve until the last run is executed (throttle leading)", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>({
       throttleMs: 300,
-      leading: true,
-      trailing: false,
+      edge: "leading",
     });
     expect(queue.result).toBeUndefined();
     let resolve1: (v: number) => void;
     let resolve2: (v: number) => void;
     let resultResolved = false;
-    const p1 = queue.run(() => new Promise<number>((r) => { resolve1 = r; }));
+    const p1 = queue.run(
+      () =>
+        new Promise<number>((r) => {
+          resolve1 = r;
+        })
+    );
     const result = queue.result;
     expect(result).not.toBeUndefined();
     result!.then(() => {
       resultResolved = true;
     });
-    vi.advanceTimersByTime(350);
-    const p2 = queue.run(() => new Promise<number>((r) => { resolve2 = r; }));
+    await wait(350);
+    const p2 = queue.run(
+      () =>
+        new Promise<number>((r) => {
+          resolve2 = r;
+        })
+    );
     expect(queue.result).toBe(result);
     // Complete the first task — result should not resolve, because throttle did not allow the second
     resolve1!(1);
@@ -391,91 +461,49 @@ describe("result consistency", () => {
     expect(await result).toBe(2);
   });
 
-it("result does not resolve until the last run is executed (throttle leading)", async () => {
-const queue = new LastWinsAndCancelsPrevious<number>({
-throttleMs: 300,
-leading: true,
-trailing: false,
-});
-expect(queue.result).toBeUndefined();
-let resolve1: (v: number) => void;
-let resolve2: (v: number) => void;
-let resultResolved = false;
-const p1 = queue.run(
-() =>
-new Promise<number>((r) => {
-resolve1 = r;
-})
-);
-const result = queue.result;
-expect(result).not.toBeUndefined();
-result!.then(() => {
-resultResolved = true;
-});
-vi.advanceTimersByTime(350);
-const p2 = queue.run(
-() =>
-new Promise<number>((r) => {
-resolve2 = r;
-})
-);
-expect(queue.result).toBe(result);
-// Complete the first task — result should not resolve, because throttle did not allow the second
-resolve1!(1);
-await Promise.resolve();
-expect(resultResolved).toBe(false);
-// Now complete the second (which should not have been called)
-resolve2!(2);
-expect(await p1).toBe(1);
-expect(await p2).toBe(2);
-expect(await result).toBe(2);
-});
-
-it("result does not resolve until trailing is executed (throttle trailing)", async () => {
-const queue = new LastWinsAndCancelsPrevious<number>({
-throttleMs: 300,
-leading: false,
-trailing: true,
-});
-expect(queue.result).toBeUndefined();
-let resolveLast: (v: number) => void;
-let resultResolved = false;
-queue.run(() => new Promise<number>((r) => {}));
-const result = queue.result;
-expect(result).not.toBeUndefined();
-queue.run(() => new Promise<number>((r) => {}));
-const lastPromise = queue.run(
-() =>
-new Promise<number>((r) => {
-resolveLast = r;
-})
-);
-expect(queue.result).toBe(result);
-result!.then(() => {
-resultResolved = true;
-});
-vi.advanceTimersByTime(300); // Only now throttle will call the task
-await Promise.resolve();
-expect(resultResolved).toBe(false);
-resolveLast!(99);
-await lastPromise;
-expect(resultResolved).toBe(true);
-expect(await lastPromise).toBe(99);
-expect(await result).toBe(99);
-    expect(await lastPromise).toBe(99);
+  it("result does not resolve until trailing is executed (throttle trailing)", async () => {
+    const queue = new LastWinsAndCancelsPrevious<number>({
+      throttleMs: 300,
+      edge: "trailing",
+    });
+    expect(queue.result).toBeUndefined();
+    let resolveLast: (v: number) => void;
+    let resultResolved = false;
+    queue.run(() => new Promise<number>((r) => {}));
+    expect(queue.result).toBeUndefined();
+    queue.run(() => new Promise<number>((r) => {}));
+    expect(queue.result).toBeUndefined();
+    const lastPromise = queue.run(
+      () =>
+        new Promise<number>((r) => {
+          resolveLast = r;
+        })
+    );
+    expect(queue.result).toBeUndefined();
+    await wait(350);
+    const result = queue.result;
+    expect(result).not.toBeUndefined();
+    result!.then(() => {
+      resultResolved = true;
+    });
+    expect(resultResolved).toBe(false);
+    resolveLast!(99);
+    await lastPromise;
     expect(await result).toBe(99);
+    expect(resultResolved).toBe(true);
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
+    expect(await lastPromise).toBe(99);
   });
 });
 
 describe("LastWinsAndCancelsPrevious — debounce/throttle behavior", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
   const makeTask =
-    (value: number, log: number[], delay = 0) =>
-    async () => {
-      await wait(delay);
+    (value: number, log: number[], delayMs?: number) =>
+    async (signal: AbortSignal) => {
       log.push(value);
+      if (delayMs) {
+        await wait(delayMs);
+      }
       return value;
     };
 
@@ -484,205 +512,176 @@ describe("LastWinsAndCancelsPrevious — debounce/throttle behavior", () => {
     const queue = new LastWinsAndCancelsPrevious<number>({ debounceMs: 300 });
 
     const r1 = queue.run(makeTask(1, log));
-    const result = queue.result;
-    vi.advanceTimersByTime(100);
+    expect(queue.result).toBeUndefined();
+    await wait(100);
+    expect(queue.result).toBeUndefined();
     const r2 = queue.run(makeTask(2, log));
-    vi.advanceTimersByTime(100);
-    const r3 = queue.run(makeTask(3, log));
-    vi.advanceTimersByTime(400);
-
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
+    expect(queue.result).toBeUndefined();
+    await wait(100);
+    expect(queue.result).toBeUndefined();
+    const r3 = queue.run(makeTask(3, log, 400));
+    expect(queue.result).toBeUndefined();
+    await wait(400);
+    const result = queue.result;
     expect(log).toEqual([3]);
     expect(await result).toBe(3);
     expect(await r1).toBeUndefined();
     expect(await r2).toBeUndefined();
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r3).toBe(3);
-    expect(await result).toBe(3);
+    expect(queue.result).toBeUndefined();
   });
 
   it("debounce leading=true: вызывает сразу, не в конце", async () => {
     const log: number[] = [];
     const queue = new LastWinsAndCancelsPrevious<number>({
       debounceMs: 300,
-      leading: true,
-      trailing: false,
+      edge: "leading",
     });
-
+    expect(queue.result).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    const result = queue.result;
-    vi.advanceTimersByTime(100);
+    expect(queue.result).not.toBeUndefined();
+    const result1 = queue.result;
+    await wait(100);
     const r2 = queue.run(makeTask(2, log));
-    vi.advanceTimersByTime(400);
+    await wait(1000);
+    expect(queue.result).toBeUndefined();
     const r3 = queue.run(makeTask(3, log));
-    vi.advanceTimersByTime(100);
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
+    const result2 = queue.result;
+    await wait(100);
     await Promise.all([r1, r2, r3]);
-    expect(await result).toBe(3);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
-    expect(await result).toBe(3);
     expect(log).toEqual([1, 3]);
+    expect(await result1).toBe(1);
+    expect(queue.result).toBeUndefined();
+    expect(await result2).toBe(3);
   });
 
   it("debounce leading + trailing: calls twice — at start and end", async () => {
     const log: number[] = [];
     const queue = new LastWinsAndCancelsPrevious<number>({
       debounceMs: 300,
-      leading: true,
-      trailing: true,
+      edge: "both",
     });
-
+    expect(queue.result).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    const result = queue.result;
-    vi.advanceTimersByTime(100);
+    const result1 = queue.result;
+    expect(result1).not.toBeUndefined();
+    await wait(100);
     const r2 = queue.run(makeTask(2, log));
-    vi.advanceTimersByTime(200);
-    const r3 = queue.run(makeTask(3, log));
-    vi.advanceTimersByTime(400);
+    await wait(200);
+    const r3 = queue.run(makeTask(3, log, 400));
+    await wait(400);
 
-    await vi.runAllTicks();
+    const result2 = queue.result;
     expect(log).toEqual([1, 3]);
-    expect(await result).toBe(3);
+    expect(await result1).toBe(1);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
+    expect(await result2).toBe(3);
+    expect(queue.result).toBeUndefined();
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r3).toBe(3);
-    expect(await result).toBe(3);
-  });
-
-  it("debounce leading=false, trailing=false: does not call anything", async () => {
-    const log: number[] = [];
-    const queue = new LastWinsAndCancelsPrevious<number>({
-      debounceMs: 300,
-      leading: false,
-      trailing: false,
-    });
-
-    const r1 = queue.run(makeTask(1, log));
-    const r2 = queue.run(makeTask(1, log));
-    const r3 = queue.run(makeTask(1, log));
-    const r4 = queue.run(makeTask(1, log));
-    vi.advanceTimersByTime(500);
-
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
-    expect(await r1).toBeUndefined();
-    expect(log).toEqual([]);
   });
 
   it("throttle leading=true: calls once per interval", async () => {
     const log: number[] = [];
     const queue = new LastWinsAndCancelsPrevious<number>({
       throttleMs: 300,
-      leading: true,
-      trailing: false,
+      edge: "leading",
     });
 
+    expect(queue.result).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    vi.advanceTimersByTime(100);
+    expect(queue.result).not.toBeUndefined();
+    await wait(100);
+    expect(queue.result).toBeUndefined();
     const r2 = queue.run(makeTask(2, log));
-    vi.advanceTimersByTime(200);
-    const r3 = queue.run(makeTask(3, log));
-    vi.advanceTimersByTime(400);
-
-    await vi.runAllTicks();
+    expect(queue.result).toBeUndefined();
+    await wait(200);
+    expect(queue.result).toBeUndefined();
+    await wait(400);
+    expect(queue.result).toBeUndefined();
+    const r3 = queue.run(makeTask(3, log, 400));
     const result = queue.result;
-    expect(await result).toBe(3);
+    expect(result).not.toBeUndefined();
+
     expect(log).toEqual([1, 3]);
     expect(await r1).toBe(1);
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
     expect(await result).toBe(3);
+    expect(queue.result).toBeUndefined();
   });
 
   it("throttle trailing=true: calls at the end of interval", async () => {
     const log: number[] = [];
     const queue = new LastWinsAndCancelsPrevious<number>({
       throttleMs: 300,
-      leading: false,
-      trailing: true,
+      edge: "trailing",
     });
 
+    expect(queue.result).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    const result = queue.result;
-    expect(result).not.toBeUndefined();
-    vi.advanceTimersByTime(100);
-    const r2 = queue.run(makeTask(2, log));
-    expect(result).toBe(queue.result);
-    vi.advanceTimersByTime(300);
-    const r3 = queue.run(makeTask(3, log));
-    expect(result).toBe(queue.result);
-    vi.advanceTimersByTime(300);
-
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
-    expect(await result).toBe(3);
+    expect(queue.result).toBeUndefined();
+    await wait(100);
+    expect(queue.result).toBeUndefined();
+    const r2 = queue.run(makeTask(2, log, 300));
+    expect(queue.result).toBeUndefined();
+    await wait(300);
+    expect(queue.result).not.toBeUndefined();
+    const r3 = queue.run(makeTask(3, log, 300));
+    await wait(300);
+    expect(queue.result).not.toBeUndefined();
     expect(await r1).toBeUndefined();
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r2).toBe(2);
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r3).toBe(3);
-    expect(await result).toBe(3);
     expect(log).toEqual([2, 3]);
+    expect(queue.result).toBeUndefined();
   });
 
   it("throttle leading + trailing: calls twice per interval", async () => {
     const log: number[] = [];
     const queue = new LastWinsAndCancelsPrevious<number>({
       throttleMs: 300,
-      leading: true,
-      trailing: true,
+      edge: "both",
     });
 
+    expect(queue.result).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    vi.advanceTimersByTime(100);
+    expect(queue.result).not.toBeUndefined();
+    await wait(100);
+    expect(queue.result).toBeUndefined();
     const r2 = queue.run(makeTask(2, log));
-    vi.advanceTimersByTime(200);
+    expect(queue.result).toBeUndefined();
+    await wait(300);
+    expect(queue.result).toBeUndefined();
     const r3 = queue.run(makeTask(3, log));
-    vi.advanceTimersByTime(400);
+    expect(queue.result).not.toBeUndefined();
+    await wait(400);
+    expect(queue.result).toBeUndefined();
     const r4 = queue.run(makeTask(4, log));
+    expect(queue.result).not.toBeUndefined();
     const result = queue.result;
     expect(result).not.toBeUndefined();
-    vi.advanceTimersByTime(400);
+    await wait(400);
 
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
     expect(await result).toBe(4);
     expect(await r1).toBe(1);
+    //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r2).toBe(2);
     expect(await r3).toBe(3);
     expect(await r4).toBe(4);
     expect(await result).toBe(4);
     expect(log).toEqual([1, 2, 3, 4]);
   });
-
-  it("throttle leading=false, trailing=false: does not call anything", async () => {
-    const log: number[] = [];
-    const queue = new LastWinsAndCancelsPrevious<number>({
-      throttleMs: 300,
-      leading: false,
-      trailing: false,
-    });
-
-    const r1 = await queue.run(makeTask(1, log));
-    const r2 = await queue.run(makeTask(1, log));
-    const r3 = await queue.run(makeTask(1, log));
-    const r4 = await queue.run(makeTask(1, log));
-    await vi.runAllTimersAsync();
-    await vi.runAllTicks();
-    expect(r1).toBeUndefined();
-    expect(log).toEqual([]);
-  });
 });
 
 describe("LastWinsAndCancelsPrevious — hooks and abort", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("calls onAborted when task is cancelled by new run", async () => {
     const onAborted = vi.fn();
     const queue = new LastWinsAndCancelsPrevious<number>();
@@ -737,7 +736,10 @@ describe("LastWinsAndCancelsPrevious — hooks and abort", () => {
     await expect(task).rejects.toThrow("fail");
     expect(onError).toHaveBeenCalledTimes(1);
     // После ошибки — isSeriesEnd === true
-    expect(onError.mock.calls[0][0]).toMatchObject({ error, isSeriesEnd: true });
+    expect(onError.mock.calls[0][0]).toMatchObject({
+      error,
+      isSeriesEnd: true,
+    });
   });
 
   it("calls onComplete when task resolves", async () => {
@@ -747,10 +749,16 @@ describe("LastWinsAndCancelsPrevious — hooks and abort", () => {
     const task = queue.run(async () => 42);
     expect(await task).toBe(42);
     expect(onComplete).toHaveBeenCalledTimes(1);
-// После успешного завершения — isSeriesEnd === true
-expect(onComplete.mock.calls[0][0]).toMatchObject({ result: 42, isSeriesEnd: true });
     // После успешного завершения — isSeriesEnd === true
-    expect(onComplete.mock.calls[0][0]).toMatchObject({ result: 42, isSeriesEnd: true });
+    expect(onComplete.mock.calls[0][0]).toMatchObject({
+      result: 42,
+      isSeriesEnd: true,
+    });
+    // После успешного завершения — isSeriesEnd === true
+    expect(onComplete.mock.calls[0][0]).toMatchObject({
+      result: 42,
+      isSeriesEnd: true,
+    });
   });
 
   it("does not call hooks extra times (multiple aborts, errors, completes)", async () => {
@@ -765,29 +773,40 @@ expect(onComplete.mock.calls[0][0]).toMatchObject({ result: 42, isSeriesEnd: tru
     await queue.run(async () => 1);
     expect(onAborted).toHaveBeenCalledTimes(0); // после первого run — не было отмен
     // Second: error
-    await expect(queue.run(async () => { throw new Error("err"); })).rejects.toThrow("err");
+    await expect(
+      queue.run(async () => {
+        throw new Error("err");
+      })
+    ).rejects.toThrow("err");
     expect(onAborted).toHaveBeenCalledTimes(1); // 1. abort by new run
     expect(onAborted.mock.calls[0][0]).toMatchObject({ isSeriesEnd: false });
     // Third: abort by new run
-    const t1 = queue.run(async (signal) => new Promise<number>((resolve) => {
-      signal.addEventListener("abort", () => resolve(-1));
-      setTimeout(() => resolve(10), 100);
-    }));
+    const t1 = queue.run(
+      async (signal) =>
+        new Promise<number>((resolve) => {
+          signal.addEventListener("abort", () => resolve(-1));
+          setTimeout(() => resolve(10), 100);
+        })
+    );
     expect(onAborted).toHaveBeenCalledTimes(2); // 2. abort by new run
-expect(onAborted.mock.calls[1][0]).toMatchObject({ isSeriesEnd: false });
+    expect(onAborted.mock.calls[1][0]).toMatchObject({ isSeriesEnd: false });
     // 2. abort by new run — isSeriesEnd: false
     expect(onAborted.mock.calls[1][0]).toMatchObject({ isSeriesEnd: false });
     const t2 = queue.run(async () => 2);
     expect(onAborted).toHaveBeenCalledTimes(3); // 3. abort by new run
-expect(onAborted.mock.calls[2][0]).toMatchObject({ isSeriesEnd: false });
+    expect(onAborted.mock.calls[2][0]).toMatchObject({ isSeriesEnd: false });
     // 3. abort by new run — isSeriesEnd: false
     expect(onAborted.mock.calls[2][0]).toMatchObject({ isSeriesEnd: false });
-    await t1; await t2;
+    await t1;
+    await t2;
     // Fourth: abort by abort()
-    const t3 = queue.run(async (signal) => new Promise<number>((resolve) => {
-      signal.addEventListener("abort", () => resolve(-1));
-      setTimeout(() => resolve(3), 100);
-    }));
+    const t3 = queue.run(
+      async (signal) =>
+        new Promise<number>((resolve) => {
+          signal.addEventListener("abort", () => resolve(-1));
+          setTimeout(() => resolve(3), 100);
+        })
+    );
     expect(onAborted).toHaveBeenCalledTimes(4); // 4. abort by abort()
     expect(onAborted.mock.calls[3][0]).toMatchObject({ isSeriesEnd: false });
     queue.abort();
@@ -800,9 +819,15 @@ expect(onAborted.mock.calls[2][0]).toMatchObject({ isSeriesEnd: false });
   });
 
   it("does not break if hook throws", async () => {
-    const onAborted = vi.fn(() => { throw new Error("hook fail"); });
-    const onError = vi.fn(() => { throw new Error("hook fail"); });
-    const onComplete = vi.fn(() => { throw new Error("hook fail"); });
+    const onAborted = vi.fn(() => {
+      throw new Error("hook fail");
+    });
+    const onError = vi.fn(() => {
+      throw new Error("hook fail");
+    });
+    const onComplete = vi.fn(() => {
+      throw new Error("hook fail");
+    });
     const queue = new LastWinsAndCancelsPrevious<number>();
     queue.onAborted(onAborted);
     queue.onError(onError);
@@ -810,12 +835,19 @@ expect(onAborted.mock.calls[2][0]).toMatchObject({ isSeriesEnd: false });
     // onComplete throws, but task still resolves
     expect(await queue.run(async () => 1)).toBe(1);
     // onError throws, but task still rejects
-    await expect(queue.run(async () => { throw new Error("err"); })).rejects.toThrow("err");
+    await expect(
+      queue.run(async () => {
+        throw new Error("err");
+      })
+    ).rejects.toThrow("err");
     // onAborted throws, but abort still works
-    const t = queue.run(async (signal) => new Promise<number>((resolve) => {
-      signal.addEventListener("abort", () => resolve(-1));
-      setTimeout(() => resolve(5), 100);
-    }));
+    const t = queue.run(
+      async (signal) =>
+        new Promise<number>((resolve) => {
+          signal.addEventListener("abort", () => resolve(-1));
+          setTimeout(() => resolve(5), 100);
+        })
+    );
     queue.abort();
     expect(await t).toBe(-1);
   });
