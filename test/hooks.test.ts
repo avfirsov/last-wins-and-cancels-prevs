@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { LastWinsAndCancelsPrevious } from "../src";
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+import { wait } from './utils';
 
 // onAborted, onError, onComplete
 
