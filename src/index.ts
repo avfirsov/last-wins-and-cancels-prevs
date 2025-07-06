@@ -50,6 +50,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private onAbortedHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
   private onErrorHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
   private onCompleteHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
+  private onSeriesStartedHooks: (() => void)[] = [];
 
   /**
    * Subscribe to abort events (any task, not just result)
@@ -79,6 +80,16 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
     return () => {
       const idx = this.onCompleteHooks.indexOf(cb);
       if (idx !== -1) this.onCompleteHooks.splice(idx, 1);
+    };
+  }
+  /**
+   * Subscribe to series start events (any task, not just result)
+   */
+  public onSeriesStarted(cb: () => void): () => void {
+    this.onSeriesStartedHooks.push(cb);
+    return () => {
+      const idx = this.onSeriesStartedHooks.indexOf(cb);
+      if (idx !== -1) this.onSeriesStartedHooks.splice(idx, 1);
     };
   }
 
@@ -124,6 +135,11 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   private fireComplete(result: R, signal: AbortSignal, isSeriesEnd: boolean) {
     for (const cb of this.onCompleteHooks) {
       cb({ result, aborted: false, error: undefined, signal, isSeriesEnd });
+    }
+  }
+  private fireSeriesStarted() {
+    for (const cb of this.onSeriesStartedHooks) {
+      cb();
     }
   }
 
@@ -206,6 +222,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
     if (!this.resultPromise) {
       this.resetResultPromise();
     }
+    this.fireSeriesStarted();
     if (this.controller) {
       // Abort previous task and fire hooks
       this.controller.abort();
