@@ -530,78 +530,109 @@ export class LastWinsAndCancelsPrevious<
    * @param task Асинхронная функция, принимающая AbortSignal
    * @returns Промис с результатом задачи или undefined, если задача не была запущена
    */
-  public run(...args: Args): Promise<R> {
+  public async run(...args: Args): Promise<R> {
     if (!this.debouncedOrThrottledRun) {
       // No debounce/throttle — just call _run
       return this._run(args) as Promise<R>;
     }
-    return new Promise<R>((_resolveOuter, _rejectOuter) => {
-      //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
-      //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
-      //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
-      const unsub = this.onTaskCanceled((params) => {
-        console.log("🚀 ~ unsub ~ params.wasStarted:", params.wasStarted);
-        if (!params.wasStarted) {
-          _rejectOuter(new TaskAbortedError());
-        }
-        setTimeout(() => unsub(), 0);
-      });
 
-      const resolveOuter = (result: R | PromiseLike<R>) => {
-        _resolveOuter(result);
-        unsub();
-      };
+    const [resultPromise, _resolveResultPromise, _rejectResultPromise] =
+      resolvablePromiseFromOutside<R>();
 
-      const rejectOuter = (error: any) => {
-        _rejectOuter(error);
-        unsub();
-      };
-      /**
-       * debouncedOrThrottledRun может
-       * - запустить задачу немедленно и вернуть промис
-       * - отменить задачу и вернуть undefined
-       * - отложить задачу и вернуть undefined
-       *  - и потом выполнить ее и выполнить resolve(R) позже
-       *  - и потом отменить ее и выполнить resolve(undefined) - напр. это был trialing throttle и после этого вызова был еще вызов ближе к концу окна
-       *
-       *
-       * Т.е. нам надо вернуть промис, который резолвится не позже ближайшей завершенной очереди
-       */
-      const [thisTaskStartedPromise, resolveTaskStarted] =
-        resolvablePromiseFromOutside<typeof startedTaskSymbol>();
-      const debouncedOrThrottledRunResult = this.debouncedOrThrottledRun!(
-        args,
-        () => resolveTaskStarted(startedTaskSymbol),
-        resolveOuter,
-        rejectOuter
-      );
-
-      const wasDeferred = debouncedOrThrottledRunResult === undefined;
-      if (!wasDeferred) {
-        resolveOuter(debouncedOrThrottledRunResult);
-        return;
+    const nextTaskStartedPromise = this.nextTaskStartedPromise;
+    
+    //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
+    //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
+    //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
+    const unsub = this.onTaskCanceled((params) => {
+      console.log("🚀 ~ unsub ~ params.wasStarted:", params.wasStarted);
+      if (!params.wasStarted) {
+        _rejectResultPromise(new TaskAbortedError());
       }
-
-      this.fireTaskDeferred(args);
-
-      const nextTaskStartedPromise = this.nextTaskStartedPromise;
-
-      Promise.race([thisTaskStartedPromise, nextTaskStartedPromise]).then(
-        (raceWinner) => {
-          //если первым заресолвился НЕ taskStartedPromise промис текущей таски - значит
-          //другая таска началась перед ней (потому что для любой таски nextTaskStartedPromise зарезолвиться строго после thisTaskStartedPromise),
-          //а значит текущая таска уже никогда не будет запущена
-          const wasIgnored = raceWinner !== startedTaskSymbol;
-          if (!wasIgnored) {
-            return;
-          }
-
-          this.fireTaskIgnored(args);
-          rejectOuter(new TaskIgnoredError());
-          return;
-        }
-      );
+      setTimeout(() => unsub(), 0);
     });
+
+    const resolveResultPromise = (result: R | PromiseLike<R>) => {
+      _resolveResultPromise(result);
+      setTimeout(() => unsub(), 0);
+    };
+
+    const rejectResultPromise = (error: any) => {
+      _rejectResultPromise(error);
+      setTimeout(() => unsub(), 0);
+    };
+    /**
+     * debouncedOrThrottledRun может
+     * - запустить задачу немедленно и вернуть промис
+     * - отменить задачу и вернуть undefined
+     * - отложить задачу и вернуть undefined
+     *  - и потом выполнить ее и выполнить resolve(R) позже
+     *  - и потом отменить ее и выполнить resolve(undefined) - напр. это был trialing throttle и после этого вызова был еще вызов ближе к концу окна
+     *
+     *
+     * Т.е. нам надо вернуть промис, который резолвится не позже ближайшей завершенной очереди
+     */
+    const [thisTaskStartedPromise, resolveThisTaskStarted] =
+      resolvablePromiseFromOutside<typeof startedTaskSymbol>();
+
+    const debouncedOrThrottledRunResult = this.debouncedOrThrottledRun!(
+      args,
+      () => resolveThisTaskStarted(startedTaskSymbol),
+      resolveResultPromise,
+      rejectResultPromise
+    );
+    console.log(
+      "🚀 ~ run ~ debouncedOrThrottledRunResult:",
+      debouncedOrThrottledRunResult,
+      args
+    );
+
+    //@startedTaskSymbol || undefined || Promise<R> для старого значения
+    //выполнение не было отложено только в первом случае
+    const thisTaskVsPrevTaskOrDeferRace = await Promise.race([
+      debouncedOrThrottledRunResult,
+      thisTaskStartedPromise,
+    ]);
+
+    const wasDeferred = thisTaskVsPrevTaskOrDeferRace !== startedTaskSymbol;
+    console.log(
+      "🚀 ~ run ~ wasDeferred:",
+      wasDeferred,
+      args,
+      thisTaskVsPrevTaskOrDeferRace
+    );
+
+    if (!wasDeferred) {
+      if (!debouncedOrThrottledRunResult) {
+        throw new Error(
+          "debouncedOrThrottledRunResult is undefined although the task was not deferred"
+        );
+      }
+      resolveResultPromise(debouncedOrThrottledRunResult);
+      return resultPromise;
+    }
+
+    this.fireTaskDeferred(args);
+
+    Promise.race([nextTaskStartedPromise, thisTaskStartedPromise]).then(
+      (thisTaskVsNextTaskRace) => {
+        const wasIgnored = thisTaskVsNextTaskRace !== startedTaskSymbol;
+        console.log(
+          "🚀 ~ run ~ wasIgnored:",
+          wasIgnored,
+          args,
+          thisTaskVsNextTaskRace
+        );
+
+        if (wasIgnored) {
+          this.fireTaskIgnored(args);
+          rejectResultPromise(new TaskIgnoredError());
+        }
+      }
+    );
+
+    console.log("🚀 ~ run ~ resultPromise:", resultPromise);
+    return resultPromise;
   }
 
   /**
@@ -615,10 +646,15 @@ export class LastWinsAndCancelsPrevious<
     onTaskCompleted?: (result: R) => void,
     onTaskFailed?: (error: any) => void
   ): Promise<R | undefined> {
+    console.log("🚀 ~ args:", args);
     try {
       onTaskStarted?.();
       //серия уже идет
       if (this.leadingTaskController) {
+        console.log(
+          "🚀 ~ _run ~ this.leadingTaskController:",
+          this.leadingTaskController
+        );
         if (!this.currentSeriesPromise) {
           throw new Error("Has controller but no resultPromise");
         }
@@ -636,6 +672,7 @@ export class LastWinsAndCancelsPrevious<
       this.leadingTaskArgs = args;
       this.leadingTaskController = new AbortController();
       const signal = this.leadingTaskController.signal;
+      console.log("🚀 ~ args, signal:", args, signal);
       this.fireTaskStarted(args, signal);
       //серия не шла, начинаем ее
       if (!this.currentSeriesPromise) {
@@ -688,6 +725,7 @@ export class LastWinsAndCancelsPrevious<
   private get nextTaskStartedPromise(): Promise<void> {
     return new Promise<void>((resolve) => {
       const unsub = this.onTaskStarted(() => {
+        console.log("🚀 ~ unsub ~ onTaskStarted:");
         resolve();
         setTimeout(() => unsub(), 0);
       });

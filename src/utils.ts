@@ -1,5 +1,5 @@
 export const resolvablePromiseFromOutside = <T>() => {
-  let resolve!: (value: T) => void;
+  let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: any) => void;
 
   const promise = new Promise<T>((res, rej) => {
