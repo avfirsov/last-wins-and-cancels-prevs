@@ -1,5 +1,7 @@
 import debounce from "lodash.debounce";
 import throttle from "lodash.throttle";
+import { DebouncedFunc } from "lodash";
+import { resolvablePromiseFromOutside } from "./utils";
 
 export type DebounceOptions = {
   debounceMs: number;
@@ -23,70 +25,184 @@ export const isThrottleOptions = (
   options: LastWinsAndCancelsPreviousOptions
 ): options is ThrottleOptions => "throttleMs" in options;
 
-export type LastWinsAndCancelsPreviousHook<R> = (args: {
+export type TaskFn<R, Args extends any[]> = (
+  signal: AbortSignal,
+  ...args: Args
+) => Promise<R>;
+
+export type OnTaskAbortedHook<Args extends any[]> = (params: {
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type OnSeriesFailedHook<Args extends any[]> = (params: {
+  error: any;
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type OnSeriesSucceededHook<R, Args extends any[]> = (params: {
+  result: R;
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type OnSeriesEndedHook<R, Args extends any[]> = (params: {
   result?: R;
   error?: any;
   aborted: boolean;
   signal: AbortSignal;
-  isSeriesEnd: boolean;
+  args: Args;
+}) => void;
+
+export type OnSeriesStartedHook<Args extends any[]> = (params: {
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type OnTaskDeferredHook<Args extends any[]> = (params: {
+  args: Args;
+}) => void;
+
+export type OnTaskIgnoredHook<Args extends any[]> = (params: {
+  args: Args;
+}) => void;
+
+export type OnAbortedTaskFinishedHook<R, Args extends any[]> = (params: {
+  result?: R;
+  error?: any;
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type onTaskStartedHook<Args extends any[]> = (params: {
+  signal: AbortSignal;
+  args: Args;
+}) => void;
+
+export type onTaskCanceledHook<Args extends any[]> = (params: {
+  args?: Args;
+  wasStarted: boolean;
+  signal?: AbortSignal;
 }) => void;
 
 export type Unsub = () => void;
 
+const startedTaskSymbol = Symbol("startedTask");
+
+export class TaskAbortedError extends Error {
+  constructor() {
+    super("Aborted");
+    this.name = "TaskAbortedError";
+  }
+}
+
+export class TaskIgnoredError extends Error {
+  constructor() {
+    super("Task ignored");
+    this.name = "TaskIgnoredError";
+  }
+}
+
 /**
  * Task queue with previous cancellation and event hooks support.
  */
-export class LastWinsAndCancelsPrevious<R = unknown> {
-  private controller?: AbortController;
-  private resultPromise!: Promise<R> | undefined;
-  private resultPromiseResolve?: (value: R) => void;
-  private resultPromiseReject?: (reason?: any) => void;
+export class LastWinsAndCancelsPrevious<
+  R = unknown,
+  Args extends any[] = any[]
+> {
+  private task: TaskFn<R, Args>;
+  private leadingTaskController?: AbortController;
+  private leadingTaskArgs?: Args;
+  private currentSeriesPromise!: Promise<R> | undefined;
+  private currentSeriesPromiseResolve?: (value: R) => void;
+  private currentSeriesPromiseReject?: (reason?: any) => void;
 
   private readonly delay: number;
   private edge: "leading" | "trailing" | "both";
 
-  private debouncedOrThrottledRun?: (...args: any[]) => any;
+  private debouncedOrThrottledRun?: DebouncedFunc<
+    (
+      args: Args,
+      onTaskStarted?: () => void,
+      onTaskCompleted?: (result: R) => void,
+      onTaskFailed?: (error: any) => void
+    ) => Promise<R>
+  >;
 
   // Event hooks
-  private onAbortedHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
-  private onErrorHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
-  private onCompleteHooks: LastWinsAndCancelsPreviousHook<R>[] = [];
-  private onSeriesStartedHooks: (() => void)[] = [];
+  private onTaskAbortedHooks: OnTaskAbortedHook<Args>[] = [];
+  private onSeriesFailedHooks: OnSeriesFailedHook<Args>[] = [];
+  private onSeriesSucceededHooks: OnSeriesSucceededHook<R, Args>[] = [];
+  private onSeriesStartedHooks: OnSeriesStartedHook<Args>[] = [];
+  private onTaskDeferredHooks: OnTaskDeferredHook<Args>[] = [];
+  private onTaskIgnoredHooks: OnTaskIgnoredHook<Args>[] = [];
+  private onAbortedTaskFinishedHooks: OnAbortedTaskFinishedHook<R, Args>[] = [];
+  private onTaskStartedHooks: onTaskStartedHook<Args>[] = [];
+  private onTaskCanceledHooks: onTaskCanceledHook<Args>[] = [];
 
   /**
    * Subscribe to abort events (any task, not just result)
    */
-  public onAborted(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
-    this.onAbortedHooks.push(cb);
+  /**
+   * Подписка на событие отмены задачи (любая задача, не только последняя).
+   * Если подписчик выбрасывает ошибку — очередь ломается (ошибка пробрасывается наружу из run/_run).
+   * Порядок вызова: onSeriesStarted → onTaskAborted → onSeriesEnded (если это последняя задача).
+   * @param cb Callback
+   * @returns Функция отписки
+   */
+  public onTaskAborted(cb: OnTaskAbortedHook<Args>): Unsub {
+    this.onTaskAbortedHooks.push(cb);
     return () => {
-      const idx = this.onAbortedHooks.indexOf(cb);
-      if (idx !== -1) this.onAbortedHooks.splice(idx, 1);
+      const idx = this.onTaskAbortedHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskAbortedHooks.splice(idx, 1);
     };
   }
   /**
    * Subscribe to error events (any task, not just result)
    */
-  public onError(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
-    this.onErrorHooks.push(cb);
+  /**
+   * Подписка на событие ошибки задачи (любая задача, не только последняя).
+   * Если подписчик выбрасывает ошибку — очередь ломается (ошибка пробрасывается наружу из run/_run).
+   * Порядок вызова: onSeriesStarted → onSeriesFailed → onSeriesEnded (если это последняя задача).
+   * @param cb Callback
+   * @returns Функция отписки
+   */
+  public onSeriesFailed(cb: OnSeriesFailedHook<Args>): Unsub {
+    this.onSeriesFailedHooks.push(cb);
     return () => {
-      const idx = this.onErrorHooks.indexOf(cb);
-      if (idx !== -1) this.onErrorHooks.splice(idx, 1);
+      const idx = this.onSeriesFailedHooks.indexOf(cb);
+      if (idx !== -1) this.onSeriesFailedHooks.splice(idx, 1);
     };
   }
   /**
    * Subscribe to completion events (any task, not just result)
    */
-  public onComplete(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
-    this.onCompleteHooks.push(cb);
+  /**
+   * Подписка на событие успешного завершения задачи (любая задача, не только последняя).
+   * Если подписчик выбрасывает ошибку — очередь ломается (ошибка пробрасывается наружу из run/_run).
+   * Порядок вызова: onSeriesStarted → onSeriesSucceeded → onSeriesEnded (если это последняя задача).
+   * @param cb Callback
+   * @returns Функция отписки
+   */
+  public onSeriesSucceeded(cb: OnSeriesSucceededHook<R, Args>): Unsub {
+    this.onSeriesSucceededHooks.push(cb);
     return () => {
-      const idx = this.onCompleteHooks.indexOf(cb);
-      if (idx !== -1) this.onCompleteHooks.splice(idx, 1);
+      const idx = this.onSeriesSucceededHooks.indexOf(cb);
+      if (idx !== -1) this.onSeriesSucceededHooks.splice(idx, 1);
     };
   }
   /**
    * Subscribe to series start events
    */
-  public onSeriesStarted(cb: () => void): Unsub {
+  /**
+   * Подписка на событие старта новой серии задач.
+   * Если подписчик выбрасывает ошибку — очередь ломается (ошибка пробрасывается наружу из run/_run).
+   * Порядок вызова: onSeriesStarted всегда вызывается перед запуском задачи.
+   * @param cb Callback
+   * @returns Функция отписки
+   */
+  public onSeriesStarted(cb: OnSeriesStartedHook<Args>): Unsub {
     this.onSeriesStartedHooks.push(cb);
     return () => {
       const idx = this.onSeriesStartedHooks.indexOf(cb);
@@ -96,15 +212,36 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
   /**
    * Subscribe to series end events
    */
-  public onSeriesEnded(cb: LastWinsAndCancelsPreviousHook<R>): Unsub {
-    const unsubComplete = this.onComplete((args) => {
-      if (args.isSeriesEnd) cb(args);
+  /**
+   * Подписка на событие завершения серии задач (последняя запущенная задача завершилась/отменилась/упала).
+   * Если подписчик выбрасывает ошибку — очередь ломается (ошибка пробрасывается наружу из run/_run).
+   * Порядок вызова: onSeriesStarted → onTaskAborted/onSeriesFailed/onSeriesSucceeded → onSeriesEnded.
+   * @param cb Callback
+   * @returns Функция отписки
+   */
+  public onSeriesEnded(cb: OnSeriesEndedHook<R, Args>): Unsub {
+    const unsubComplete = this.onSeriesSucceeded((params) => {
+      cb({
+        result: params.result,
+        signal: params.signal,
+        aborted: false,
+        args: params.args,
+      });
     });
-    const unsubError = this.onError((args) => {
-      if (args.isSeriesEnd) cb(args);
+    const unsubError = this.onSeriesFailed((params) => {
+      cb({
+        error: params.error,
+        signal: params.signal,
+        aborted: false,
+        args: params.args,
+      });
     });
-    const unsubAborted = this.onAborted((args) => {
-      if (args.isSeriesEnd) cb(args);
+    const unsubAborted = this.onTaskAborted((params) => {
+      cb({
+        aborted: true,
+        signal: params.signal,
+        args: params.args,
+      });
     });
     return () => {
       unsubComplete();
@@ -112,57 +249,225 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
       unsubAborted();
     };
   }
+
+  public onTaskDeferred(cb: OnTaskDeferredHook<Args>): Unsub {
+    this.onTaskDeferredHooks.push(cb);
+    return () => {
+      const idx = this.onTaskDeferredHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskDeferredHooks.splice(idx, 1);
+    };
+  }
+
+  public onTaskIgnored(cb: OnTaskIgnoredHook<Args>): Unsub {
+    this.onTaskIgnoredHooks.push(cb);
+    return () => {
+      const idx = this.onTaskIgnoredHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskIgnoredHooks.splice(idx, 1);
+    };
+  }
+
+  public onAbortedTaskFinished(cb: OnAbortedTaskFinishedHook<R, Args>): Unsub {
+    this.onAbortedTaskFinishedHooks.push(cb);
+    return () => {
+      const idx = this.onAbortedTaskFinishedHooks.indexOf(cb);
+      if (idx !== -1) this.onAbortedTaskFinishedHooks.splice(idx, 1);
+    };
+  }
+
+  public onTaskStarted(cb: onTaskStartedHook<Args>): Unsub {
+    this.onTaskStartedHooks.push(cb);
+    return () => {
+      const idx = this.onTaskStartedHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskStartedHooks.splice(idx, 1);
+    };
+  }
+
+  public onTaskCanceled(cb: onTaskCanceledHook<Args>): Unsub {
+    this.onTaskCanceledHooks.push(cb);
+    return () => {
+      const idx = this.onTaskCanceledHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskCanceledHooks.splice(idx, 1);
+    };
+  }
+
   /**
    * Forcefully aborts the current winning task (and fires hooks)
    */
+  /**
+   * Принудительно отменяет текущую задачу и все отложенные (debounced/throttled).
+   * После вызова abort очередь становится idle (result = undefined).
+   * Вызывает хуки onTaskAborted/onSeriesEnded.
+   */
   public abort(): void {
-    if (!(this.controller && !this.controller.signal.aborted)) {
-      return;
+    // Отменяем текущую задачу
+    const err = new TaskAbortedError();
+    if (
+      this.leadingTaskController &&
+      !this.leadingTaskController.signal.aborted
+    ) {
+      this.leadingTaskController.abort();
+      if (!this.leadingTaskArgs) {
+        throw new Error(
+          "this.leadingTaskController defined, but leading task args is undefined"
+        );
+      }
+      this.fireTaskAborted(
+        this.leadingTaskArgs,
+        this.leadingTaskController.signal
+      );
+      this.fireTaskCanceled(
+        true,
+        this.leadingTaskArgs,
+        this.leadingTaskController.signal
+      );
+    } else {
+      this.fireTaskCanceled(false);
     }
-    this.controller.abort();
-    // After abort(), the queue is always idle since run is not called
-    this.fireAborted(undefined, this.controller.signal, true);
-    this.clearResultPromise();
+    this.clearSeries(false);
+    // Отменяем отложенные задачи (debounce/throttle)
+    if (this.debouncedOrThrottledRun) {
+      this.debouncedOrThrottledRun.cancel();
+    }
+    this.currentSeriesPromiseReject?.(err);
   }
 
   /**
    * Internal call for abort hooks
+   * Вызывается при отмене любого запущенного запроса
    * @param isSeriesEnd true if this is the final abort (queue is idle)
    */
-  private fireAborted(
-    result: R | undefined,
-    signal: AbortSignal,
-    isSeriesEnd: boolean
-  ) {
-    for (const cb of this.onAbortedHooks) {
-      cb({ result, aborted: true, error: undefined, signal, isSeriesEnd });
+  /**
+   * Internal call for abort hooks
+   * Вызывается при отмене любого запущенного запроса
+   * @param isSeriesEnd true if this is the final abort (queue is idle)
+   */
+  private fireTaskAborted(args: Args, signal: AbortSignal) {
+    for (const cb of this.onTaskAbortedHooks) {
+      cb({
+        args,
+        signal,
+      });
     }
   }
   /**
    * Internal call for error hooks
+   * Вызывается при ошибке любого запущенного запроса
    * @param isSeriesEnd true if the queue is idle after error
    */
-  private fireError(error: any, signal: AbortSignal, isSeriesEnd: boolean) {
-    for (const cb of this.onErrorHooks) {
-      cb({ error, aborted: false, result: undefined, signal, isSeriesEnd });
+  /**
+   * Internal call for failure hooks
+   * Вызывается при ошибке любого запущенного запроса
+   * @param isSeriesEnd true if the queue is idle after error
+   */
+  private fireSeriesFailed(error: any, signal: AbortSignal, args: Args) {
+    for (const cb of this.onSeriesFailedHooks) {
+      cb({ error, signal, args });
     }
   }
   /**
    * Internal call for complete hooks
+   * Вызывается при успешном завершении любого запущенного запроса
    * @param isSeriesEnd true if the queue is idle after completion
    */
-  private fireComplete(result: R, signal: AbortSignal, isSeriesEnd: boolean) {
-    for (const cb of this.onCompleteHooks) {
-      cb({ result, aborted: false, error: undefined, signal, isSeriesEnd });
-    }
-  }
-  private fireSeriesStarted() {
-    for (const cb of this.onSeriesStartedHooks) {
-      cb();
+  /**
+   * Internal call for success hooks
+   * Вызывается при успешном завершении любого запущенного запроса
+   * @param isSeriesEnd true if the queue is idle after completion
+   */
+  private fireSeriesSucceeded(result: R, signal: AbortSignal, args: Args) {
+    for (const cb of this.onSeriesSucceededHooks) {
+      cb({ result, signal, args });
     }
   }
 
-  constructor(options?: LastWinsAndCancelsPreviousOptions) {
+  private fireTaskDeferred(args: Args) {
+    for (const cb of this.onTaskDeferredHooks) {
+      cb({ args });
+    }
+  }
+
+  private fireTaskIgnored(args: Args) {
+    for (const cb of this.onTaskIgnoredHooks) {
+      cb({ args });
+    }
+  }
+
+  private fireAbortedTaskFinished(
+    signal: AbortSignal,
+    args: Args,
+    result?: R,
+    error?: any
+  ) {
+    for (const cb of this.onAbortedTaskFinishedHooks) {
+      cb({ result, error, signal, args });
+    }
+  }
+
+  private startSeries(args: Args, signal: AbortSignal) {
+    this.currentSeriesPromise = new Promise<R>((resolve, reject) => {
+      this.currentSeriesPromiseResolve = resolve;
+      this.currentSeriesPromiseReject = reject;
+    });
+    this.fireSeriesStarted(args, signal);
+  }
+
+  private fireSeriesStarted(args: Args, signal: AbortSignal) {
+    for (const cb of this.onSeriesStartedHooks) {
+      cb({
+        signal,
+        args,
+      });
+    }
+  }
+
+  private fireTaskStarted(args: Args, signal: AbortSignal) {
+    for (const cb of this.onTaskStartedHooks) {
+      cb({
+        signal,
+        args,
+      });
+    }
+  }
+
+  private fireTaskCanceled(
+    wasStarted: boolean,
+    args?: Args,
+    signal?: AbortSignal
+  ) {
+    console.log("🚀 ~ fireTaskCanceled ~ wasStarted:", wasStarted);
+    for (const cb of this.onTaskCanceledHooks) {
+      cb({
+        args,
+        signal,
+        wasStarted,
+      });
+    }
+  }
+
+  private clearSeries(fallbackResolve?: boolean, fallbackResult?: any) {
+    this.leadingTaskController = undefined;
+    this.leadingTaskArgs = undefined;
+    if (fallbackResolve) {
+      this.currentSeriesPromiseResolve?.(fallbackResult);
+    } else {
+      this.currentSeriesPromiseReject?.(fallbackResult);
+    }
+    this.currentSeriesPromiseResolve = undefined;
+    this.currentSeriesPromiseReject = undefined;
+    this.currentSeriesPromise = undefined;
+  }
+
+  /**
+   * @param options
+   * - Если передан debounceMs, используется режим debounce (по умолчанию edge: trailing, как в lodash)
+   * - Если передан throttleMs, используется режим throttle (по умолчанию edge: leading, как в lodash)
+   * - После создания экземпляра опции изменить нельзя
+   */
+  constructor(
+    task: TaskFn<R, Args>,
+    options?: LastWinsAndCancelsPreviousOptions
+  ) {
+    this.task = task;
     if (!options) {
       this.delay = 0;
       this.edge = "trailing";
@@ -174,10 +479,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
       this.delay = options.debounceMs;
       this.edge = options.edge ?? "trailing";
       this.debouncedOrThrottledRun = debounce(
-        (task, resolve, reject, callMarker) => {
-          callMarker.called = true;
-          this._run(task).then(resolve, reject);
-        },
+        this._run.bind(this),
         this.delay,
         {
           leading: this.edge === "leading" || this.edge === "both",
@@ -188,10 +490,7 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
       this.delay = options.throttleMs;
       this.edge = options.edge ?? "leading";
       this.debouncedOrThrottledRun = throttle(
-        (task, resolve, reject, callMarker) => {
-          callMarker.called = true;
-          this._run(task).then(resolve, reject);
-        },
+        this._run.bind(this),
         this.delay,
         {
           leading: this.edge === "leading" || this.edge === "both",
@@ -205,77 +504,215 @@ export class LastWinsAndCancelsPrevious<R = unknown> {
     }
   }
 
-  private resetResultPromise() {
-    this.resultPromise = new Promise<R>((resolve, reject) => {
-      this.resultPromiseResolve = resolve;
-      this.resultPromiseReject = reject;
-    });
-  }
-
-  private clearResultPromise() {
-    this.resultPromiseResolve = undefined;
-    this.resultPromiseReject = undefined;
-    this.resultPromise = undefined;
-  }
-
-  public run<T extends R>(
-    task: (signal: AbortSignal) => Promise<T>
-  ): Promise<T | undefined> {
+  /**
+   * Запускает новую задачу в очереди, отменяя предыдущую (если она была).
+   *
+   * Контракт:
+   * - Если опции debounce/throttle не заданы, задача стартует немедленно, run возвращает промис с результатом задачи.
+   * - Если задан debounce/throttle, задача может быть отложена или отменена согласно edge/таймингу.
+   * - Если задача не была запущена (например, из-за отмены или отсутствия trailing/leading), промис из run резолвится в undefined.
+   * - Каждый вызов run возвращает отдельный промис, который резолвится либо результатом задачи, либо undefined.
+   *
+   * Важно: после завершения всех задач (очередь пуста) геттер result возвращает undefined. Новый вызов run создаёт новый промис — старый становится невалидным.
+   *
+   * После создания экземпляра опции (debounce/throttle/edge) изменить нельзя.
+   *
+   * Если подписчик любого хука выбрасывает ошибку — эта ошибка "ломает" очередь (выбросится наружу из run/_run, дальнейшая работа не гарантируется).
+   *
+   * Порядок вызова хуков:
+   * - onSeriesStarted → onTaskAborted/onSeriesFailed/onSeriesSucceeded (в зависимости от исхода задачи)
+   * - onSeriesEnded вызывается после завершения серии (последней задачи)
+   *
+   * Метод abort отменяет и текущую задачу, и все отложенные (debounced/throttled).
+   *
+   * По умолчанию edge: debounce — trailing (как в lodash), throttle — leading (как в lodash).
+   *
+   * @param task Асинхронная функция, принимающая AbortSignal
+   * @returns Промис с результатом задачи или undefined, если задача не была запущена
+   */
+  public run(...args: Args): Promise<R> {
     if (!this.debouncedOrThrottledRun) {
       // No debounce/throttle — just call _run
-      return this._run(task);
+      return this._run(args) as Promise<R>;
     }
-    const called = { called: false };
-    return new Promise<T | undefined>((resolve, reject) => {
-      this.debouncedOrThrottledRun!(task, resolve, reject, called);
-      // If debounced/throttled does not call _run synchronously, wait for a tick and check
-      Promise.resolve().then(() => {
-        if (!called.called) resolve(undefined);
+    return new Promise<R>((_resolveOuter, _rejectOuter) => {
+      //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
+      //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
+      //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
+      const unsub = this.onTaskCanceled((params) => {
+        console.log("🚀 ~ unsub ~ params.wasStarted:", params.wasStarted);
+        if (!params.wasStarted) {
+          _rejectOuter(new TaskAbortedError());
+        }
+        setTimeout(() => unsub(), 0);
+      });
+
+      const resolveOuter = (result: R | PromiseLike<R>) => {
+        _resolveOuter(result);
+        unsub();
+      };
+
+      const rejectOuter = (error: any) => {
+        _rejectOuter(error);
+        unsub();
+      };
+      /**
+       * debouncedOrThrottledRun может
+       * - запустить задачу немедленно и вернуть промис
+       * - отменить задачу и вернуть undefined
+       * - отложить задачу и вернуть undefined
+       *  - и потом выполнить ее и выполнить resolve(R) позже
+       *  - и потом отменить ее и выполнить resolve(undefined) - напр. это был trialing throttle и после этого вызова был еще вызов ближе к концу окна
+       *
+       *
+       * Т.е. нам надо вернуть промис, который резолвится не позже ближайшей завершенной очереди
+       */
+      const [thisTaskStartedPromise, resolveTaskStarted] =
+        resolvablePromiseFromOutside<typeof startedTaskSymbol>();
+      const debouncedOrThrottledRunResult = this.debouncedOrThrottledRun!(
+        args,
+        () => resolveTaskStarted(startedTaskSymbol),
+        resolveOuter,
+        rejectOuter
+      );
+
+      const wasDeferred = debouncedOrThrottledRunResult === undefined;
+      if (!wasDeferred) {
+        resolveOuter(debouncedOrThrottledRunResult);
+        return;
+      }
+
+      this.fireTaskDeferred(args);
+
+      const nextTaskStartedPromise = this.nextTaskStartedPromise;
+
+      Promise.race([thisTaskStartedPromise, nextTaskStartedPromise]).then(
+        (raceWinner) => {
+          //если первым заресолвился НЕ taskStartedPromise промис текущей таски - значит
+          //другая таска началась перед ней (потому что для любой таски nextTaskStartedPromise зарезолвиться строго после thisTaskStartedPromise),
+          //а значит текущая таска уже никогда не будет запущена
+          const wasIgnored = raceWinner !== startedTaskSymbol;
+          if (!wasIgnored) {
+            return;
+          }
+
+          this.fireTaskIgnored(args);
+          rejectOuter(new TaskIgnoredError());
+          return;
+        }
+      );
+    });
+  }
+
+  /**
+   * Запускает задачу немедленно, отменяя предыдущую. Используется только внутри run и обёрток debounce/throttle.
+   * Не вызывайте напрямую — для пользователя предназначен только run.
+   * @private
+   */
+  private async _run(
+    args: Args,
+    onTaskStarted?: () => void,
+    onTaskCompleted?: (result: R) => void,
+    onTaskFailed?: (error: any) => void
+  ): Promise<R | undefined> {
+    try {
+      onTaskStarted?.();
+      //серия уже идет
+      if (this.leadingTaskController) {
+        if (!this.currentSeriesPromise) {
+          throw new Error("Has controller but no resultPromise");
+        }
+
+        if (this.leadingTaskController.signal.aborted) {
+          console.log("Таска запустилась хотя уже отменена - странный кейс");
+          this.fireTaskAborted(args, this.leadingTaskController.signal);
+          throw new TaskAbortedError();
+        }
+        // Abort previous task and fire hooks
+        this.leadingTaskController.abort();
+        // If a new task starts, the series does not end
+        this.fireTaskAborted(args, this.leadingTaskController.signal);
+      }
+      this.leadingTaskArgs = args;
+      this.leadingTaskController = new AbortController();
+      const signal = this.leadingTaskController.signal;
+      this.fireTaskStarted(args, signal);
+      //серия не шла, начинаем ее
+      if (!this.currentSeriesPromise) {
+        this.startSeries(args, signal);
+      }
+      try {
+        const result = await this.task(signal, ...args);
+        if (!signal.aborted) {
+          this.currentSeriesPromiseResolve?.(result);
+          // After successful completion — the series ends
+          this.fireSeriesSucceeded(result, signal, args);
+          this.clearSeries(true, result);
+          onTaskCompleted?.(result);
+          return result;
+        }
+        this.fireAbortedTaskFinished(signal, args, result);
+        const error = new TaskAbortedError();
+        onTaskFailed?.(error);
+        throw error;
+      } catch (err) {
+        if (!signal.aborted) {
+          this.currentSeriesPromiseReject?.(err);
+          // After error — the series ends
+          this.fireSeriesFailed(err, signal, args);
+          this.clearSeries(false, err);
+          onTaskFailed?.(err);
+        }
+        throw err;
+      }
+    } catch (err) {
+      if (onTaskFailed) {
+        onTaskFailed(err);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Промис последней "выигравшей" задачи (той, что реально стартовала).
+   * Если очередь пуста (все задачи завершились/отменены) — undefined.
+   * После нового run старый result становится невалидным (резолвится/отклоняется только последний).
+   *
+   * @returns Promise<R> | undefined
+   */
+  public get currentSeriesResult(): Promise<R> | undefined {
+    return this.currentSeriesPromise;
+  }
+
+  private get nextTaskStartedPromise(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const unsub = this.onTaskStarted(() => {
+        resolve();
+        setTimeout(() => unsub(), 0);
       });
     });
   }
 
-  private _run<T extends R>(
-    task: (signal: AbortSignal) => Promise<T>
-  ): Promise<T | undefined> {
-    if (!this.resultPromise) {
-      this.resetResultPromise();
-    }
-    this.fireSeriesStarted();
-    if (this.controller) {
-      // Abort previous task and fire hooks
-      this.controller.abort();
-      // If a new task starts, the series does not end
-      this.fireAborted(undefined, this.controller.signal, false);
-    }
-    this.controller = new AbortController();
-    const signal = this.controller.signal;
-    let completed = false;
-    return task(signal)
-      .then((result) => {
-        if (!signal.aborted) {
-          completed = true;
-          this.resultPromiseResolve?.(result);
-          // After successful completion — the series ends
-          this.fireComplete(result, signal, true);
-          this.clearResultPromise();
+  /**
+   * промис который завершается результатом серии, которая завершиться первой после вычисления этого геттера
+   * если серия упадет с ошибкой - реджектнет
+   */
+  public get nextSeriesResult(): Promise<R | undefined> {
+    return new Promise<R | undefined>((resolve, reject) => {
+      const unsub = this.onSeriesEnded((result) => {
+        if (result.aborted) {
+          reject(result.signal);
+        } else if (result.error) {
+          reject(result.error);
+        } else if (result.result) {
+          resolve(result.result);
+        } else {
+          setTimeout(() => unsub(), 0);
+          throw new Error("Unexpected result");
         }
-        return result;
-      })
-      .catch((err) => {
-        if (!signal.aborted) {
-          this.resultPromiseReject?.(err);
-          // After error — the series ends
-          this.fireError(err, signal, true);
-          this.clearResultPromise();
-          throw err;
-        }
-        this.fireError(err, signal, false);
-        throw err;
+        setTimeout(() => unsub(), 0);
       });
-  }
-
-  public get result(): Promise<R> | undefined {
-    return this.resultPromise;
+    });
   }
 }

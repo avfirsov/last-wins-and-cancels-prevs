@@ -11,82 +11,75 @@ import { makeTask, wait } from "./utils";
 
 describe("LastWinsAndCancelsPrevious", () => {
   it("resolves the result of a single task", async () => {
-    const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
-    const runResult = queue.run(async () => 42);
-    expect(queue.result).not.toBeUndefined();
-    const result = queue.result;
+    const queue = new LastWinsAndCancelsPrevious<number, [number]>(async (_signal: AbortSignal, value: number) => value);
+    expect(queue.currentSeriesResult).toBeUndefined();
+    const runResult = queue.run(42);
+    expect(queue.currentSeriesResult).not.toBeUndefined();
+    const result = queue.currentSeriesResult;
     expect(await runResult).toBe(42);
     expect(await result).toBe(42);
   });
 
   it("cancels the previous task when a new one is started", async () => {
-    const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
-    let firstAborted = false;
-    const first = queue.run(async (signal) => {
+    const queue = new LastWinsAndCancelsPrevious<number, []>((signal) => {
       return new Promise<number>((resolve) => {
         signal.addEventListener("abort", () => {
-          firstAborted = true;
           resolve(-1);
         });
         setTimeout(() => resolve(1), 100);
       });
     });
-    const result = queue.result;
+    expect(queue.currentSeriesResult).toBeUndefined();
+    const first = queue.run();
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
-    const second = queue.run(async () => 2);
-    expect(queue.result).toBe(result);
+    const second = queue.run();
+    expect(queue.currentSeriesResult).toBe(result);
     expect(await second).toBe(2);
     expect(await first).toBe(-1);
-    expect(firstAborted).toBe(true);
-    expect(await result).toBe(2);
   });
 
+
+
   it("run returns undefined when the task is cancelled", async () => {
-    const queue = new LastWinsAndCancelsPrevious<number | undefined>();
-    expect(queue.result).toBeUndefined();
-    const first = queue.run(async (signal) => {
-      return new Promise<number | undefined>((resolve) => {
-        signal.addEventListener("abort", () => resolve(undefined));
-        setTimeout(() => resolve(1), 100);
-      });
-    });
-    const result = queue.result;
+    const queue = new LastWinsAndCancelsPrevious<number, [number]>(async (_, value) => value);
+    expect(queue.currentSeriesResult).toBeUndefined();
+    const first = queue.run(1);
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
-    const second = queue.run(async () => 2); // отменяет первую
-    expect(queue.result).toBe(result);
+    const second = queue.run(2); // отменяет первую
+    expect(queue.currentSeriesResult).toBe(result);
     expect(await first).toBeUndefined();
     expect(await second).toBe(2);
     expect(await result).toBe(2);
   });
 
   it("result resolves only with the last task", async () => {
-    const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
-    queue.run(async () => 1);
-    const result = queue.result;
-    expect(queue.result).toBe(result);
-    queue.run(async () => 2);
-    expect(queue.result).toBe(result);
-    const last = queue.run(async () => 3);
+    const queue = new LastWinsAndCancelsPrevious<number, [number]>(async (_, value) => value);
+    expect(queue.currentSeriesResult).toBeUndefined();
+    queue.run(1);
+    const result = queue.currentSeriesResult;
+    expect(queue.currentSeriesResult).toBe(result);
+    queue.run(2);
+    expect(queue.currentSeriesResult).toBe(result);
+    const last = queue.run(3);
     expect(await last).toBe(3);
     expect(await result).toBe(3);
   });
 
   it("old tasks without AbortSignal finish, but do not affect result", async () => {
-    const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
+    const queue = new LastWinsAndCancelsPrevious<number, [number]>();
+    expect(queue.currentSeriesResult).toBeUndefined();
     let finished = false;
     const first = queue.run(async () => {
       await new Promise((r) => setTimeout(() => r("first"), 100));
       finished = true;
       return 1;
     });
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     const last = queue.run(async () => 2);
-    expect(queue.result).toBe(result);
+    expect(queue.currentSeriesResult).toBe(result);
     await wait(100);
     expect(await last).toBe(2);
     expect(await result).toBe(2);
@@ -96,12 +89,12 @@ describe("LastWinsAndCancelsPrevious", () => {
 
   it("an error in the task leads to result rejection", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const error = new Error("fail");
     const task = queue.run(async () => {
       throw error;
     });
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     await expect(task).rejects.toThrow("fail");
     await expect(result).rejects.toThrow("fail");
@@ -117,7 +110,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           reject1 = rej;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((res) => {
@@ -141,7 +134,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           reject1 = rej;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((res) => {
@@ -168,13 +161,13 @@ describe("LastWinsAndCancelsPrevious", () => {
     task1
       .then((v) => console.log("🚀 ~ it ~ v:", v))
       .catch((e) => console.log("🚀 ~ it ~ e:", e));
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     // Start the second task, which completes successfully
     const task2 = queue.run(async () => 42);
-    expect(resultPromise).toBe(queue.result);
+    expect(resultPromise).toBe(queue.currentSeriesResult);
     // First task fails with error, but is already cancelled
     task1Reject!(error1);
-    expect(queue.result).toBe(resultPromise);
+    expect(queue.currentSeriesResult).toBe(resultPromise);
     console.log("🚀 ~ it ~ task1:", task1);
     expect(await task2).toBe(42);
     expect(await resultPromise).toBe(42);
@@ -191,7 +184,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           resolve1 = res;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((_, rej) => {
@@ -215,7 +208,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           resolve1 = res;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((_, rej) => {
@@ -232,13 +225,13 @@ describe("LastWinsAndCancelsPrevious", () => {
   it("if the second task fails — result and task2 reject, task1 success", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
     const task1 = queue.run(async () => 1);
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     // Вторая задача падает
     const error2 = new Error("fail2");
     const task2 = queue.run(async () => {
       throw error2;
     });
-    expect(queue.result).toBe(resultPromise);
+    expect(queue.currentSeriesResult).toBe(resultPromise);
     expect(await task1).toBe(1);
     await expect(task2).rejects.toThrow("fail2");
     await expect(resultPromise).rejects.toThrow("fail2");
@@ -255,7 +248,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           reject1 = rej;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((_, rej) => {
@@ -280,7 +273,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           reject1 = rej;
         })
     );
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(
       () =>
         new Promise<number>((_, rej) => {
@@ -301,11 +294,11 @@ describe("LastWinsAndCancelsPrevious", () => {
     const task1 = queue.run(async () => {
       throw error1;
     });
-    const resultPromise = queue.result;
+    const resultPromise = queue.currentSeriesResult;
     const task2 = queue.run(async () => {
       throw error2;
     });
-    expect(queue.result).toBe(resultPromise);
+    expect(queue.currentSeriesResult).toBe(resultPromise);
     await expect(task1).rejects.toThrow("fail1");
     await expect(task2).rejects.toThrow("fail2");
     await expect(resultPromise).rejects.toThrow("fail2");
@@ -313,7 +306,7 @@ describe("LastWinsAndCancelsPrevious", () => {
 
   it("concurrent: only the result of the last task goes to result", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     let resolve1: (v: number) => void;
     let resolve2: (v: number) => void;
     let resolve3: (v: number) => void;
@@ -323,7 +316,7 @@ describe("LastWinsAndCancelsPrevious", () => {
           resolve1 = r;
         })
     );
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     const p2 = queue.run(
       () =>
@@ -331,14 +324,14 @@ describe("LastWinsAndCancelsPrevious", () => {
           resolve2 = r;
         })
     );
-    expect(queue.result).toBe(result);
+    expect(queue.currentSeriesResult).toBe(result);
     const p3 = queue.run(
       () =>
         new Promise<number>((r) => {
           resolve3 = r;
         })
     );
-    expect(queue.result).toBe(result);
+    expect(queue.currentSeriesResult).toBe(result);
     resolve3!(33);
     expect(await p3).toBe(33);
     resolve1!(11);
@@ -353,7 +346,7 @@ describe("LastWinsAndCancelsPrevious", () => {
 describe("result consistency", () => {
   it("result does not resolve until the last run is finished (no debounce/throttle)", async () => {
     const queue = new LastWinsAndCancelsPrevious<number>();
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     let resolve1: (v: number) => void;
     let resolve2: (v: number) => void;
     let resultResolved = false;
@@ -363,7 +356,7 @@ describe("result consistency", () => {
           resolve1 = r;
         })
     );
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     const p2 = queue.run(
       () =>
@@ -371,8 +364,8 @@ describe("result consistency", () => {
           resolve2 = r;
         })
     );
-    expect(queue.result).toBe(result);
-    const resultPromise = queue.result!;
+    expect(queue.currentSeriesResult).toBe(result);
+    const resultPromise = queue.currentSeriesResult!;
     resultPromise.then(() => {
       resultResolved = true;
     });

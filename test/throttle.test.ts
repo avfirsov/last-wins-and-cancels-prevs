@@ -10,19 +10,19 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
       edge: "leading",
     });
 
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    expect(queue.result).not.toBeUndefined();
+    expect(queue.currentSeriesResult).not.toBeUndefined();
     await wait(100);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r2 = queue.run(makeTask(2, log));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(200);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(400);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r3 = queue.run(makeTask(3, log, 400));
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
 
     expect(log).toEqual([1, 3]);
@@ -30,7 +30,7 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
     expect(await r2).toBeUndefined();
     expect(await r3).toBe(3);
     expect(await result).toBe(3);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
   });
 
   it("throttle trailing=true: calls at the end of interval", async () => {
@@ -40,25 +40,25 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
       edge: "trailing",
     });
 
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(100);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r2 = queue.run(makeTask(2, log, 300));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(300);
-    expect(queue.result).not.toBeUndefined();
+    expect(queue.currentSeriesResult).not.toBeUndefined();
     const r3 = queue.run(makeTask(3, log, 300));
     await wait(300);
-    expect(queue.result).not.toBeUndefined();
+    expect(queue.currentSeriesResult).not.toBeUndefined();
     expect(await r1).toBeUndefined();
     //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r2).toBe(2);
     //тот самый случай, когда мы не отследили что таска была отложена и подумали что ее скипнул дебаунс и вернули undefined а он не скипал ее а просто отложил
     expect(await r3).toBe(3);
     expect(log).toEqual([2, 3]);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
   });
 
   it("throttle leading + trailing: calls twice per interval", async () => {
@@ -68,22 +68,22 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
       edge: "both",
     });
 
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r1 = queue.run(makeTask(1, log));
-    expect(queue.result).not.toBeUndefined();
+    expect(queue.currentSeriesResult).not.toBeUndefined();
     await wait(100);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r2 = queue.run(makeTask(2, log));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(300);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r3 = queue.run(makeTask(3, log));
-    expect(queue.result).not.toBeUndefined();
+    expect(queue.currentSeriesResult).not.toBeUndefined();
     await wait(400);
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const r4 = queue.run(makeTask(4, log));
-    expect(queue.result).not.toBeUndefined();
-    const result = queue.result;
+    expect(queue.currentSeriesResult).not.toBeUndefined();
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     await wait(400);
 
@@ -102,7 +102,7 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
       throttleMs: 300,
       edge: "leading",
     });
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     let resolve1: (v: number) => void;
     let resolve2: (v: number) => void;
     let resultResolved = false;
@@ -112,7 +112,7 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
           resolve1 = r;
         })
     );
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     result!.then(() => {
       resultResolved = true;
@@ -124,7 +124,7 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
           resolve2 = r;
         })
     );
-    expect(queue.result).toBe(result);
+    expect(queue.currentSeriesResult).toBe(result);
     // Complete the first task — result should not resolve, because throttle did not allow the second
     resolve1!(1);
     await Promise.resolve();
@@ -141,22 +141,22 @@ describe("LastWinsAndCancelsPrevious — throttle behavior", () => {
       throttleMs: 300,
       edge: "trailing",
     });
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     let resolveLast: (v: number) => void;
     let resultResolved = false;
     queue.run(() => new Promise<number>((r) => {}));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     queue.run(() => new Promise<number>((r) => {}));
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     const lastPromise = queue.run(
       () =>
         new Promise<number>((r) => {
           resolveLast = r;
         })
     );
-    expect(queue.result).toBeUndefined();
+    expect(queue.currentSeriesResult).toBeUndefined();
     await wait(350);
-    const result = queue.result;
+    const result = queue.currentSeriesResult;
     expect(result).not.toBeUndefined();
     result!.then(() => {
       resultResolved = true;
