@@ -80,10 +80,10 @@ export type onTaskStartedHook<Args extends any[]> = (params: {
   args: Args;
 }) => void;
 
+type onTaskCanceledInternalHook = () => void;
+
 export type onTaskCanceledHook<Args extends any[]> = (params: {
-  args?: Args;
-  wasStarted: boolean;
-  signal?: AbortSignal;
+  args: Args;
 }) => void;
 
 export type Unsub = () => void;
@@ -94,6 +94,13 @@ export class TaskAbortedError extends Error {
   constructor() {
     super("Aborted");
     this.name = "TaskAbortedError";
+  }
+}
+
+export class TaskCanceledError extends Error {
+  constructor() {
+    super("Canceled");
+    this.name = "TaskCanceledError";
   }
 }
 
@@ -140,6 +147,7 @@ export class LastWinsAndCancelsPrevious<
   private onAbortedTaskFinishedHooks: OnAbortedTaskFinishedHook<R, Args>[] = [];
   private onTaskStartedHooks: onTaskStartedHook<Args>[] = [];
   private onTaskCanceledHooks: onTaskCanceledHook<Args>[] = [];
+  private onTaskCanceledInternalHooks: onTaskCanceledInternalHook[] = [];
 
   /**
    * Subscribe to abort events (any task, not just result)
@@ -290,6 +298,14 @@ export class LastWinsAndCancelsPrevious<
     };
   }
 
+  public onTaskCanceledInternal(cb: onTaskCanceledInternalHook): Unsub {
+    this.onTaskCanceledInternalHooks.push(cb);
+    return () => {
+      const idx = this.onTaskCanceledInternalHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskCanceledInternalHooks.splice(idx, 1);
+    };
+  }
+
   /**
    * Forcefully aborts the current winning task (and fires hooks)
    */
@@ -315,13 +331,8 @@ export class LastWinsAndCancelsPrevious<
         this.leadingTaskArgs,
         this.leadingTaskController.signal
       );
-      this.fireTaskCanceled(
-        true,
-        this.leadingTaskArgs,
-        this.leadingTaskController.signal
-      );
     } else {
-      this.fireTaskCanceled(false);
+      this.fireTaskCanceledInternal();
     }
     this.clearSeries(false);
     // Отменяем отложенные задачи (debounce/throttle)
@@ -429,18 +440,17 @@ export class LastWinsAndCancelsPrevious<
     }
   }
 
-  private fireTaskCanceled(
-    wasStarted: boolean,
-    args?: Args,
-    signal?: AbortSignal
-  ) {
-    console.log("🚀 ~ fireTaskCanceled ~ wasStarted:", wasStarted);
+  private fireTaskCanceled(args: Args) {
     for (const cb of this.onTaskCanceledHooks) {
       cb({
         args,
-        signal,
-        wasStarted,
       });
+    }
+  }
+
+  private fireTaskCanceledInternal() {
+    for (const cb of this.onTaskCanceledInternalHooks) {
+      cb();
     }
   }
 
@@ -540,15 +550,13 @@ export class LastWinsAndCancelsPrevious<
       resolvablePromiseFromOutside<R>();
 
     const nextTaskStartedPromise = this.nextTaskStartedPromise;
-    
+
     //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
     //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
     //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
-    const unsub = this.onTaskCanceled((params) => {
-      console.log("🚀 ~ unsub ~ params.wasStarted:", params.wasStarted);
-      if (!params.wasStarted) {
-        _rejectResultPromise(new TaskAbortedError());
-      }
+    const unsub = this.onTaskCanceledInternal(() => {
+      _rejectResultPromise(new TaskCanceledError());
+      this.fireTaskCanceled(args);
       setTimeout(() => unsub(), 0);
     });
 

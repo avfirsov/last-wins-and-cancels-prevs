@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LastWinsAndCancelsPrevious,
   TaskAbortedError,
+  TaskCanceledError,
   TaskIgnoredError,
 } from "../src/index";
 
@@ -87,7 +88,7 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     vi.advanceTimersByTime(50);
     queue.abort();
     vi.advanceTimersByTime(100);
-    await expect(p).rejects.toThrow(TaskAbortedError);
+    await expect(p).rejects.toThrow(TaskCanceledError);
     expect(queue.currentSeriesResult).toBeUndefined();
   });
 
