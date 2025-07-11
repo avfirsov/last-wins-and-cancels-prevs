@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LastWinsAndCancelsPrevious,
-  TaskCanceledError,
+  TaskAbortedError,
   TaskIgnoredError,
 } from "../src/index";
 
@@ -19,7 +19,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     await wait(10);
     const p2 = queue.run(2);
     await wait(31);
-    await expect(p1).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
     await expect(p2).resolves.toBe(2);
   });
 
@@ -32,8 +32,8 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     await wait(10);
     queue.abort();
     await wait(51);
-    await expect(p1).rejects.toThrow(TaskCanceledError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
   });
 
   // 3. run → run (разные аргументы) → пауза > debounce → run
@@ -59,8 +59,8 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     await wait(10);
     const p3 = queue.run(3);
     await wait(41);
-    await expect(p1).rejects.toThrow(TaskCanceledError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
     await expect(p3).resolves.toBe(3);
   });
 
@@ -83,8 +83,8 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const p2 = queue.run(20);
     queue.abort();
     await wait(110);
-    await expect(p1).rejects.toThrow(TaskCanceledError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
   });
 
   // 7. run, затем run, затем второй run стартует (таймер истёк), затем abort
@@ -110,8 +110,8 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const p2 = queue.run(2);
     queue.abort();
     await wait(31);
-    await expect(p1).rejects.toThrow(TaskCanceledError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
     expect(started).toBe(0);
     expect(ignored).toBe(0);
     expect(aborted).toBe(2);

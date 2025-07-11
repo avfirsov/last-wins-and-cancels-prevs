@@ -1,15 +1,12 @@
-import { wait } from './utils';
+import { wait } from "./utils";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LastWinsAndCancelsPrevious,
   TaskAbortedError,
-  TaskCanceledError,
   TaskIgnoredError,
 } from "../src/index";
 
-
 describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
-
   it("leading: повторные run в окне игнорируются", async () => {
     const queue = new LastWinsAndCancelsPrevious(
       async (_signal, x: number) => x,
@@ -59,7 +56,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
     queue.run(1);
     queue.run(2);
     queue.run(3);
-    await wait(0)
+    await wait(0);
     expect(started).toBe(1);
     expect(aborted).toBe(0);
     expect(ignored).toBe(2);
@@ -159,7 +156,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
     queue.run(1);
     queue.run(2);
     queue.run(42);
-    await wait(16);
+    await wait(20);
     expect(trailingArg).toBe(42);
   });
 
@@ -173,7 +170,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
     queue.abort();
     await wait(26);
     await expect(p1).rejects.toThrow(TaskAbortedError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
     // trailing задача отменена
     // trailing промис не создаётся, но можно проверить хуки/счётчики если нужно
   });

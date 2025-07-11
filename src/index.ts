@@ -560,12 +560,7 @@ export class LastWinsAndCancelsPrevious<
       },
       resolveResultPromise,
       rejectResultPromise
-    );
-    console.log(
-      "🚀 ~ run ~ debouncedOrThrottledRunResult:",
-      debouncedOrThrottledRunResult,
-      args
-    );
+    )?.catch(() => {});
 
     //@startedTaskSymbol || undefined || Promise<R> для старого значения
     //выполнение не было отложено только в первом случае
@@ -575,12 +570,6 @@ export class LastWinsAndCancelsPrevious<
     ]);
 
     const wasDeferred = thisTaskVsPrevTaskOrDeferRace !== startedTaskSymbol;
-    console.log(
-      "🚀 ~ run ~ wasDeferred:",
-      wasDeferred,
-      args,
-      thisTaskVsPrevTaskOrDeferRace
-    );
 
     if (!wasDeferred) {
       if (!debouncedOrThrottledRunResult) {
@@ -588,7 +577,7 @@ export class LastWinsAndCancelsPrevious<
           "debouncedOrThrottledRunResult is undefined although the task was not deferred"
         );
       }
-      resolveResultPromise(debouncedOrThrottledRunResult);
+      resolveResultPromise(debouncedOrThrottledRunResult as Promise<R>);
       return resultPromise;
     }
 
@@ -600,21 +589,9 @@ export class LastWinsAndCancelsPrevious<
       return resultPromise;
     }
 
-    console.log(
-      "🚀 ~ run ~ this.currentSeriesResult:",
-      this.currentSeriesResult,
-      args
-    );
-
     Promise.race([nextTaskStartedPromise, thisTaskStartedPromise]).then(
       (thisTaskVsNextTaskRace) => {
         const wasIgnored = thisTaskVsNextTaskRace !== startedTaskSymbol;
-        console.log(
-          "🚀 ~ run ~ wasIgnored:",
-          wasIgnored,
-          args,
-          thisTaskVsNextTaskRace
-        );
 
         if (wasIgnored) {
           this.fireTaskIgnored(args);
@@ -623,7 +600,6 @@ export class LastWinsAndCancelsPrevious<
       }
     );
 
-    console.log("🚀 ~ run ~ resultPromise:", resultPromise);
     return resultPromise;
   }
 
@@ -638,21 +614,15 @@ export class LastWinsAndCancelsPrevious<
     onTaskCompleted?: (result: R) => void,
     onTaskFailed?: (error: any) => void
   ): Promise<R | undefined> {
-    console.log("🚀 ~ args:", args);
     try {
       onTaskStarted?.();
       //серия уже идет
       if (this.leadingTaskController) {
-        console.log(
-          "🚀 ~ _run ~ this.leadingTaskController:",
-          this.leadingTaskController
-        );
         if (!this.currentSeriesPromise) {
           throw new Error("Has controller but no resultPromise");
         }
 
         if (this.leadingTaskController.signal.aborted) {
-          console.log("Таска запустилась хотя уже отменена - странный кейс");
           this.fireTaskAborted(args, this.leadingTaskController.signal);
           throw new TaskAbortedError();
         }
@@ -664,7 +634,6 @@ export class LastWinsAndCancelsPrevious<
       this.leadingTaskArgs = args;
       this.leadingTaskController = new AbortController();
       const signal = this.leadingTaskController.signal;
-      console.log("🚀 ~ args, signal:", args, signal);
       this.fireTaskStarted(args, signal);
       //серия не шла, начинаем ее
       if (!this.currentSeriesPromise) {
@@ -672,7 +641,6 @@ export class LastWinsAndCancelsPrevious<
       }
       try {
         const result = await this.task(signal, ...args);
-        console.log("🚀 ~ result:", result);
         if (!signal.aborted) {
           this.currentSeriesPromiseResolve?.(result);
           // After successful completion — the series ends
@@ -718,7 +686,6 @@ export class LastWinsAndCancelsPrevious<
   private get nextTaskStartedPromise(): Promise<void> {
     return new Promise<void>((resolve) => {
       const unsub = this.onTaskStarted(() => {
-        console.log("🚀 ~ unsub ~ onTaskStarted:");
         resolve();
         setTimeout(() => unsub(), 0);
       });

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LastWinsAndCancelsPrevious,
   TaskAbortedError,
-  TaskCanceledError,
   TaskIgnoredError,
 } from "../src/index";
 
@@ -87,7 +86,7 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     await wait(50);
     queue.abort();
     await wait(100);
-    await expect(p).rejects.toThrow(TaskCanceledError);
+    await expect(p).rejects.toThrow(TaskAbortedError);
     expect(queue.currentSeriesResult).toBeUndefined();
   });
 
@@ -107,7 +106,7 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     expect(r2).toBe(222);
   });
 
-  // Проверка хуков: onTaskStarted только для реально стартовавшей, onTaskCancelled для отменённых
+  // Проверка хуков: onTaskStarted только для реально стартовавшей, onTaskIgnored для проигнорированных
   it("Проверка хуков с debounce", async () => {
     let started = 0,
       ignored = 0;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { LastWinsAndCancelsPrevious, TaskAbortedError, TaskCanceledError } from '../src/index';
+import { LastWinsAndCancelsPrevious, TaskAbortedError } from '../src/index';
 
 // Мокаем fetch для контроля вызовов и отмен
 const originalFetch = globalThis.fetch;
@@ -108,7 +108,7 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
       }, { debounceMs: 50 });
       const p = queue.run('https://test-endpoint');
       queue.abort();
-      await expect(p).rejects.toThrow(TaskCanceledError);
+      await expect(p).rejects.toThrow(TaskAbortedError);
       expect(fetchSpy).not.toHaveBeenCalled();
     });
 
@@ -233,8 +233,8 @@ describe('LastWinsAndCancelsPrevious — дополнительные edge/corne
     const p1 = queue.run(1);
     const p2 = queue.run(1);
     queue.abort();
-    await expect(p1).rejects.toThrow(TaskCanceledError);
-    await expect(p2).rejects.toThrow(TaskCanceledError);
+    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p2).rejects.toThrow(TaskAbortedError);
     expect(started + aborted).toBeGreaterThan(0);
   });
 
