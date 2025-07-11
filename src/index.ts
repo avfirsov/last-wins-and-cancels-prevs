@@ -354,11 +354,6 @@ export class LastWinsAndCancelsPrevious<
     }
   }
   /**
-   * Internal call for complete hooks
-   * Вызывается при успешном завершении любого запущенного запроса
-   * @param isSeriesEnd true if the queue is idle after completion
-   */
-  /**
    * Internal call for success hooks
    * Вызывается при успешном завершении любого запущенного запроса
    * @param isSeriesEnd true if the queue is idle after completion
