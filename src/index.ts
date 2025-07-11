@@ -31,8 +31,8 @@ export type TaskFn<R, Args extends any[]> = (
 ) => Promise<R>;
 
 export type OnTaskAbortedHook<Args extends any[]> = (params: {
-  signal: AbortSignal;
-  args: Args;
+  signal?: AbortSignal;
+  args?: Args;
 }) => void;
 
 export type OnSeriesFailedHook<Args extends any[]> = (params: {
@@ -82,10 +82,6 @@ export type onTaskStartedHook<Args extends any[]> = (params: {
 
 type onTaskAbortedInternalHook = () => void;
 
-export type onTaskCanceledHook<Args extends any[]> = (params: {
-  args: Args;
-}) => void;
-
 export type Unsub = () => void;
 
 const startedTaskSymbol = Symbol("startedTask");
@@ -94,13 +90,6 @@ export class TaskAbortedError extends Error {
   constructor() {
     super("Aborted");
     this.name = "TaskAbortedError";
-  }
-}
-
-export class TaskCanceledError extends Error {
-  constructor() {
-    super("Canceled");
-    this.name = "TaskCanceledError";
   }
 }
 
@@ -146,7 +135,6 @@ export class LastWinsAndCancelsPrevious<
   private onTaskIgnoredHooks: OnTaskIgnoredHook<Args>[] = [];
   private onAbortedTaskFinishedHooks: OnAbortedTaskFinishedHook<R, Args>[] = [];
   private onTaskStartedHooks: onTaskStartedHook<Args>[] = [];
-  private onTaskCanceledHooks: onTaskCanceledHook<Args>[] = [];
   private onTaskAbortedInternalHooks: onTaskAbortedInternalHook[] = [];
 
   /**
@@ -245,6 +233,7 @@ export class LastWinsAndCancelsPrevious<
       });
     });
     const unsubAborted = this.onTaskAborted((params) => {
+      if (!params.signal || !params.args) return;
       cb({
         aborted: true,
         signal: params.signal,
@@ -287,14 +276,6 @@ export class LastWinsAndCancelsPrevious<
     return () => {
       const idx = this.onTaskStartedHooks.indexOf(cb);
       if (idx !== -1) this.onTaskStartedHooks.splice(idx, 1);
-    };
-  }
-
-  public onTaskCanceled(cb: onTaskCanceledHook<Args>): Unsub {
-    this.onTaskCanceledHooks.push(cb);
-    return () => {
-      const idx = this.onTaskCanceledHooks.indexOf(cb);
-      if (idx !== -1) this.onTaskCanceledHooks.splice(idx, 1);
     };
   }
 
@@ -349,7 +330,7 @@ export class LastWinsAndCancelsPrevious<
    * Вызывается при отмене любого запущенного запроса
    * @param isSeriesEnd true if this is the final abort (queue is idle)
    */
-  private fireTaskAborted(args: Args, signal: AbortSignal) {
+  private fireTaskAborted(args?: Args, signal?: AbortSignal) {
     for (const cb of this.onTaskAbortedHooks) {
       cb({
         args,
@@ -432,14 +413,6 @@ export class LastWinsAndCancelsPrevious<
     for (const cb of this.onTaskStartedHooks) {
       cb({
         signal,
-        args,
-      });
-    }
-  }
-
-  private fireTaskCanceled(args: Args) {
-    for (const cb of this.onTaskCanceledHooks) {
-      cb({
         args,
       });
     }
@@ -547,18 +520,13 @@ export class LastWinsAndCancelsPrevious<
       resolvablePromiseFromOutside<R>();
 
     const nextTaskStartedPromise = this.nextTaskStartedPromise;
-    let started = false;
 
     //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
     //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
     //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
     const unsub = this.onTaskAbortedInternal(() => {
-      if (started) {
-        _rejectResultPromise(new TaskAbortedError());
-      } else {
-        _rejectResultPromise(new TaskCanceledError());
-        this.fireTaskCanceled(args);
-      }
+      this.fireTaskAborted(args);
+      _rejectResultPromise(new TaskAbortedError());
       setTimeout(() => unsub(), 0);
     });
 
@@ -588,7 +556,6 @@ export class LastWinsAndCancelsPrevious<
     const debouncedOrThrottledRunResult = this.debouncedOrThrottledRun!(
       args,
       () => {
-        started = true;
         resolveThisTaskStarted(startedTaskSymbol);
       },
       resolveResultPromise,

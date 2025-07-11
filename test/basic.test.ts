@@ -72,15 +72,15 @@ describe('LastWinsAndCancelsPrevious — базовые сценарии', () =>
     await expect(next).resolves.toBe(42);
   });
 
-  it('Проверка хуков onTaskStarted/onTaskCancelled', async () => {
+  it('Проверка хуков onTaskStarted/onTaskAborted', async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x);
     let started = false;
-    let cancelled = false;
+    let aborted = false;
     queue.onTaskStarted(() => { started = true; });
-    queue.onTaskCanceled(() => { cancelled = true; });
+    queue.onTaskAborted(() => { aborted = true; });
     const p = queue.run(7);
     queue.abort();
     await expect(p).rejects.toThrow(TaskAbortedError);
-    expect(started || cancelled).toBe(true); // хотя бы один хук должен сработать
+    expect(started || aborted).toBe(true); // хотя бы один хук должен сработать
   });
 });

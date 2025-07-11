@@ -41,7 +41,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
 
   it("leading: хуки вызываются корректно", async () => {
     let started = 0,
-      canceled = 0,
+      aborted = 0,
       ignored = 0;
     const queue = new LastWinsAndCancelsPrevious(
       async (_signal, x: number) => x,
@@ -50,8 +50,8 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
     queue.onTaskStarted(() => {
       started++;
     });
-    queue.onTaskCanceled(() => {
-      canceled++;
+    queue.onTaskAborted(() => {
+      aborted++;
     });
     queue.onTaskIgnored(() => {
       ignored++;
@@ -61,7 +61,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
     queue.run(3);
     await wait(0)
     expect(started).toBe(1);
-    expect(canceled).toBe(0);
+    expect(aborted).toBe(0);
     expect(ignored).toBe(2);
   });
 

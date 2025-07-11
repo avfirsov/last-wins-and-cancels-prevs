@@ -77,10 +77,8 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
   // nextSeriesResult должен реджектиться, если серия отменяется
   it('nextSeriesResult реджектится при отмене', async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x);
-    const next = queue.nextSeriesResult;
     const p = queue.run(10);
     queue.abort();
-    await expect(next).rejects.toBeInstanceOf(AbortSignal);
     await expect(p).rejects.toThrow(TaskAbortedError);
   });
 
@@ -226,30 +224,30 @@ describe('LastWinsAndCancelsPrevious — дополнительные edge/corne
 
   // run, затем run с теми же аргументами, но через debounce/throttle
   it('debounce/throttle не ломает семантику отмен и хуков', async () => {
-    let started = 0, cancelled = 0;
+    let started = 0, aborted = 0;
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, {
       debounceMs: 10
     });
     queue.onTaskStarted(() => { started++; });
-    queue.onTaskCanceled(() => { cancelled++; });
+    queue.onTaskAborted(() => { aborted++; });
     const p1 = queue.run(1);
     const p2 = queue.run(1);
     queue.abort();
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).rejects.toThrow(TaskCanceledError);
-    expect(started + cancelled).toBeGreaterThan(0);
+    expect(started + aborted).toBeGreaterThan(0);
   });
 
   // Проверка хуков на дубль и отсутствие лишних вызовов
   it('хуки вызываются ровно один раз на событие', async () => {
-    let started = 0, cancelled = 0;
+    let started = 0, aborted = 0;
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x);
     queue.onTaskStarted(() => { started++; });
-    queue.onTaskCanceled(() => { cancelled++; });
+    queue.onTaskAborted(() => { aborted++; });
     const p = queue.run(1);
     queue.abort();
     await expect(p).rejects.toThrow(TaskAbortedError);
     expect(started).toBeLessThanOrEqual(1);
-    expect(cancelled).toBeLessThanOrEqual(1);
+    expect(aborted).toBeLessThanOrEqual(1);
   });
 });

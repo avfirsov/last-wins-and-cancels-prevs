@@ -101,11 +101,10 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
 
   // 8. Проверка хуков на edge-кейсах
   it("debounce: хуки не дублируются на corner-кейсах", async () => {
-    let started = 0, ignored = 0, canceled = 0, aborted = 0;
+    let started = 0, ignored = 0, aborted = 0;
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 30 });
     queue.onTaskStarted(() => { started++; });
     queue.onTaskIgnored(() => { ignored++; });
-    queue.onTaskCanceled(() => { canceled++; });
     queue.onTaskAborted(() => { aborted++; });
     const p1 = queue.run(1);
     const p2 = queue.run(2);
@@ -115,8 +114,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     await expect(p2).rejects.toThrow(TaskCanceledError);
     expect(started).toBe(0);
     expect(ignored).toBe(0);
-    expect(aborted).toBe(0);
-    expect(canceled).toBe(2);
+    expect(aborted).toBe(2);
   });
 
   // 9. Проверка передачи аргументов во всех сценариях
