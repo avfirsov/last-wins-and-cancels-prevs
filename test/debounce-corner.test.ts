@@ -1,29 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   LastWinsAndCancelsPrevious,
-  TaskAbortedError,
-  TaskCanceledError,
   TaskCanceledError,
   TaskIgnoredError,
 } from "../src/index";
 
+import { wait } from './utils';
+
 describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  
 
   // 1. run → abort → run (всё в пределах debounce)
   it("run → abort → run: первая отменена, вторая выполняется", async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 30 });
     const p1 = queue.run(1);
-    vi.advanceTimersByTime(10);
+    await wait(10);
     queue.abort();
-    vi.advanceTimersByTime(10);
+    await wait(10);
     const p2 = queue.run(2);
-    vi.advanceTimersByTime(31);
+    await wait(31);
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).resolves.toBe(2);
   });
@@ -32,11 +27,11 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
   it("run → run → abort: обе отменены, ни одна не стартует", async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 50 });
     const p1 = queue.run(1);
-    vi.advanceTimersByTime(10);
+    await wait(10);
     const p2 = queue.run(2);
-    vi.advanceTimersByTime(10);
+    await wait(10);
     queue.abort();
-    vi.advanceTimersByTime(51);
+    await wait(51);
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).rejects.toThrow(TaskCanceledError);
   });
@@ -46,11 +41,11 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 20 });
     const p1 = queue.run(1);
     const p2 = queue.run(2);
-    vi.advanceTimersByTime(21);
+    await wait(21);
     await expect(p1).rejects.toThrow(TaskIgnoredError);
     await expect(p2).resolves.toBe(2);
     const p3 = queue.run(3);
-    vi.advanceTimersByTime(21);
+    await wait(21);
     await expect(p3).resolves.toBe(3);
   });
 
@@ -59,11 +54,11 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 40 });
     const p1 = queue.run(1);
     const p2 = queue.run(2);
-    vi.advanceTimersByTime(10);
+    await wait(10);
     queue.abort();
-    vi.advanceTimersByTime(10);
+    await wait(10);
     const p3 = queue.run(3);
-    vi.advanceTimersByTime(41);
+    await wait(41);
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).rejects.toThrow(TaskCanceledError);
     await expect(p3).resolves.toBe(3);
@@ -75,7 +70,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const p1 = queue.run(1);
     const p2 = queue.run(2);
     const p3 = queue.run(2);
-    vi.advanceTimersByTime(26);
+    await wait(26);
     await expect(p1).rejects.toThrow(TaskIgnoredError);
     await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(2);
@@ -87,7 +82,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const p1 = queue.run(10);
     const p2 = queue.run(20);
     queue.abort();
-    vi.advanceTimersByTime(110);
+    await wait(110);
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).rejects.toThrow(TaskCanceledError);
   });
@@ -97,7 +92,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x, { debounceMs: 15 });
     const p1 = queue.run(1);
     const p2 = queue.run(2);
-    vi.advanceTimersByTime(16);
+    await wait(16);
     await expect(p1).rejects.toThrow(TaskIgnoredError);
     // Вторая задача стартовала, теперь abort
     queue.abort();
@@ -115,7 +110,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     const p1 = queue.run(1);
     const p2 = queue.run(2);
     queue.abort();
-    vi.advanceTimersByTime(31);
+    await wait(31);
     await expect(p1).rejects.toThrow(TaskCanceledError);
     await expect(p2).rejects.toThrow(TaskCanceledError);
     expect(started).toBe(0);
@@ -131,7 +126,7 @@ describe("LastWinsAndCancelsPrevious — debounce (corner-cases)", () => {
     queue.run(10);
     queue.run(20);
     queue.run(30);
-    vi.advanceTimersByTime(21);
+    await wait(21);
     expect(lastArg).toBe(30);
   });
 });

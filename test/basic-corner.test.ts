@@ -59,7 +59,7 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
   // Задача выбрасывает ошибку — промис реджектится этой ошибкой
   it('run с ошибкой', async () => {
     const queue = new LastWinsAndCancelsPrevious(async () => { throw new Error('fail'); });
-    await expect(queue.run(1)).rejects.toThrow('fail');
+    await expect(queue.run()).rejects.toThrow('fail');
   });
 
   // Первая задача медленная, вторая быстрая — только вторая должна выполниться

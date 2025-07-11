@@ -77,7 +77,7 @@ describe('LastWinsAndCancelsPrevious — базовые сценарии', () =>
     let started = false;
     let cancelled = false;
     queue.onTaskStarted(() => { started = true; });
-    queue.onTaskCanceled(({ wasStarted }) => { if (wasStarted) cancelled = true; });
+    queue.onTaskCanceled(() => { cancelled = true; });
     const p = queue.run(7);
     queue.abort();
     await expect(p).rejects.toThrow(TaskAbortedError);

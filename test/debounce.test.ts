@@ -6,13 +6,10 @@ import {
   TaskIgnoredError,
 } from "../src/index";
 
+import { wait } from './utils';
+
 describe("LastWinsAndCancelsPrevious — debounce", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  
 
   // Один вызов run — задача выполняется с задержкой debounce
   it("Одиночный run с debounce — задача стартует с задержкой", async () => {
@@ -21,10 +18,10 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       { debounceMs: 50 }
     );
     const promise = queue.run(5);
-    vi.advanceTimersByTime(49);
+    await wait(49);
     // Пока не стартовала
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(1);
+    await wait(1);
     const result = await promise;
     expect(result).toBe(10);
   });
@@ -38,18 +35,18 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     expect(queue.currentSeriesResult).toBeUndefined();
     const p1 = queue.run(1);
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(50);
+    await wait(50);
     expect(queue.currentSeriesResult).toBeUndefined();
     const p2 = queue.run(2);
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(50);
+    await wait(50);
     expect(queue.currentSeriesResult).toBeUndefined();
     const p3 = queue.run(3);
     expect(queue.currentSeriesResult).toBeUndefined();
     // Всё ещё не стартовало
-    vi.advanceTimersByTime(99);
+    await wait(99);
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(10);
+    await wait(10);
     await expect(p1).rejects.toThrow(TaskIgnoredError);
     await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(3);
@@ -64,15 +61,17 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     expect(queue.currentSeriesResult).toBeUndefined();
     const p1 = queue.run(10);
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(31);
-    expect(await queue.currentSeriesResult).toBe(10);
+    const nextSeriesResult = queue.nextSeriesResult;
+    await wait(31);
+    await expect(nextSeriesResult).resolves.toBe(10);
     const r1 = await p1;
     expect(r1).toBe(10);
     expect(queue.currentSeriesResult).toBeUndefined();
     const p2 = queue.run(20);
     expect(queue.currentSeriesResult).toBeUndefined();
-    vi.advanceTimersByTime(31);
-    expect(await queue.currentSeriesResult).toBe(20);
+    const nextSeriesResult2 = queue.nextSeriesResult;
+    await wait(31);
+    await expect(nextSeriesResult2).resolves.toBe(20);
     const r2 = await p2;
     expect(r2).toBe(20);
     expect(queue.currentSeriesResult).toBeUndefined();
@@ -85,9 +84,9 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       { debounceMs: 100 }
     );
     const p = queue.run(1);
-    vi.advanceTimersByTime(50);
+    await wait(50);
     queue.abort();
-    vi.advanceTimersByTime(100);
+    await wait(100);
     await expect(p).rejects.toThrow(TaskCanceledError);
     expect(queue.currentSeriesResult).toBeUndefined();
   });
@@ -99,10 +98,10 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       { debounceMs: 20 }
     );
     const p1 = queue.run(111);
-    vi.advanceTimersByTime(21);
+    await wait(21);
     const r1 = await p1;
     const p2 = queue.run(222);
-    vi.advanceTimersByTime(21);
+    await wait(21);
     const r2 = await p2;
     expect(r1).toBe(111);
     expect(r2).toBe(222);
@@ -125,7 +124,7 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     const p1 = queue.run(1);
     const p2 = queue.run(2);
     const p3 = queue.run(3);
-    vi.advanceTimersByTime(41);
+    await wait(41);
     await expect(p1).rejects.toThrow(TaskIgnoredError);
     await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(3);
@@ -146,7 +145,7 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     queue.run(100);
     queue.run(200);
     queue.run(300);
-    vi.advanceTimersByTime(26);
+    await wait(26);
     expect(calledWith).toEqual([300]);
   });
 });
