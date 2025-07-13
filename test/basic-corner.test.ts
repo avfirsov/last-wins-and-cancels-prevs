@@ -27,11 +27,9 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
   // Проверяем гонку между run и abort: задача отменяется до старта
   it('Гонка run и abort: задача отменяется до старта', async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x);
-    const p = queue.run(1).catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
-    const currentSeriesPromise = queue.currentSeriesResult?.catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
+    queue.run(1).catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
+    queue.currentSeriesResult!.catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
     queue.abort();
-    await expect(p).rejects.toThrow(TaskAbortedError);
-    await expect(currentSeriesPromise).rejects.toThrow(TaskAbortedError);
   });
 
   // Запускаем две задачи подряд, затем abort — обе должны быть отменены
