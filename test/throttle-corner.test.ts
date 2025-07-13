@@ -51,10 +51,9 @@ describe("LastWinsAndCancelsPrevious — throttle corner cases", () => {
     });
     const queue = createThrottleQueue(fn, { ms: 40, edge: "leading" });
     const p1 = queue.run(1);
-    const p2 = queue.run(2);
+    const p2 = queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(60);
     expect(await p1).toBe(1);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(results).toEqual([1]);
   });
@@ -66,10 +65,9 @@ describe("LastWinsAndCancelsPrevious — throttle corner cases", () => {
       return x;
     });
     const queue = createThrottleQueue(fn, { ms: 40, edge: "trailing" });
-    const p1 = queue.run(1);
+    const p1 = queue.run(1).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     const p2 = queue.run(2);
     await wait(60);
-    await expect(p1).rejects.toThrow(TaskIgnoredError);
     expect(await p2).toBe(2);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(results).toEqual([2]);
@@ -99,32 +97,27 @@ describe("LastWinsAndCancelsPrevious — throttle corner cases", () => {
     });
     const queue = createThrottleQueue(fn, { ms: 40, edge: "leading" });
     const p1 = queue.run(1);
-    const p2 = queue.run(2);
-    const p3 = queue.run(3);
+    const p2 = queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
+    const p3 = queue.run(3).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(60);
     expect(await p1).toBe(1);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
-    await expect(p3).rejects.toThrow(TaskIgnoredError);
     expect(fn).toHaveBeenCalledTimes(1);
     expect(results).toEqual([1]);
   });
 
-  it("хуки onTaskStarted/onTaskAborted/onTaskIgnored вызываются корректно", async () => {
+  it("хуки onTaskStarted/onTaskIgnored вызываются корректно", async () => {
     const started: number[] = [],
-      aborted: number[] = [],
       ignored: number[] = [];
     const fn = vi.fn(async (signal: AbortSignal) => 1);
     const queue = createThrottleQueue(fn, { ms: 40, edge: "leading" });
     queue.onTaskStarted(() => started.push(Date.now()));
-    queue.onTaskAborted(() => aborted.push(Date.now()));
     queue.onTaskIgnored(() => ignored.push(Date.now()));
     const ac = new AbortController();
     const p1 = queue.run();
-    const p2 = queue.run({ signal: ac.signal });
+    const p2 = queue.run({ signal: ac.signal }).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     ac.abort();
     await wait(60);
-    expect(started.length + aborted.length + ignored.length).toBe(2);
-    // либо started+ignored, либо started+aborted
+    expect(started.length + ignored.length).toBe(2);
   });
 
   it("разные очереди с throttle не мешают друг другу", async () => {

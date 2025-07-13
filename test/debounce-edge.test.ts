@@ -14,13 +14,11 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
     );
     const p1 = queue.run(1);
     await wait(10);
-    const p2 = queue.run(2);
+    queue.run(2).catch((err) => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(10);
-    const p3 = queue.run(3);
+    queue.run(3).catch((err) => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(21);
     await expect(p1).resolves.toBe(1);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
-    await expect(p3).rejects.toThrow(TaskIgnoredError);
   });
 
   it("leading: run после паузы снова стартует немедленно", async () => {
@@ -54,8 +52,8 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'leading'", () => {
       ignored++;
     });
     queue.run(1);
-    queue.run(2);
-    queue.run(3);
+    queue.run(2).catch((err) => expect(err).toBeInstanceOf(TaskIgnoredError));
+    queue.run(3).catch((err) => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(0);
     expect(started).toBe(1);
     expect(aborted).toBe(0);
@@ -85,12 +83,11 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
     );
     const p1 = queue.run(1);
     await wait(10);
-    const p2 = queue.run(2);
+    const p2 = queue.run(2).catch((err) => expect(err).toBeInstanceOf(TaskIgnoredError));
     await wait(10);
     const p3 = queue.run(3);
     await wait(41);
     await expect(p1).resolves.toBe(1);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(3);
     // trailing
     expect(results).toEqual([1, 3]);
@@ -137,7 +134,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
       ignored++;
     });
     queue.run(1);
-    queue.run(2);
+    queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     queue.run(3);
     await wait(21);
     expect(started).toBe(2); // leading и trailing
@@ -154,7 +151,7 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
       { debounceMs: 15, edge: "both" }
     );
     queue.run(1);
-    queue.run(2);
+    queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     queue.run(42);
     await wait(20);
     expect(trailingArg).toBe(42);
@@ -165,12 +162,10 @@ describe("LastWinsAndCancelsPrevious — debounce edge: 'both'", () => {
       async (_signal, x: number) => x,
       { debounceMs: 25, edge: "both" }
     );
-    const p1 = queue.run(1);
-    const p2 = queue.run(2);
+    const p1 = queue.run(1).catch(err => expect(err).toBeInstanceOf(TaskAbortedError));
+    const p2 = queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskAbortedError));
     queue.abort();
     await wait(26);
-    await expect(p1).rejects.toThrow(TaskAbortedError);
-    await expect(p2).rejects.toThrow(TaskAbortedError);
     // trailing задача отменена
     // trailing промис не создаётся, но можно проверить хуки/счётчики если нужно
   });

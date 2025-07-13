@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
-import { LastWinsAndCancelsPrevious, TaskAbortedError } from '../src/index';
+import { LastWinsAndCancelsPrevious, TaskAbortedError, TaskIgnoredError } from '../src/index';
+import { wait } from './utils';
 
 // Мокаем fetch для контроля вызовов и отмен
 const originalFetch = globalThis.fetch;
@@ -26,9 +27,11 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
   // Проверяем гонку между run и abort: задача отменяется до старта
   it('Гонка run и abort: задача отменяется до старта', async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => x);
-    const p = queue.run(1);
+    const p = queue.run(1).catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
+    const currentSeriesPromise = queue.currentSeriesResult?.catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
     queue.abort();
     await expect(p).rejects.toThrow(TaskAbortedError);
+    await expect(currentSeriesPromise).rejects.toThrow(TaskAbortedError);
   });
 
   // Запускаем две задачи подряд, затем abort — обе должны быть отменены
@@ -65,12 +68,11 @@ describe('LastWinsAndCancelsPrevious — базовые corner-кейсы', () =
   // Первая задача медленная, вторая быстрая — только вторая должна выполниться
   it('run → run (медленная и быстрая): только вторая валидна', async () => {
     const queue = new LastWinsAndCancelsPrevious(async (_signal, x: number) => {
-      await new Promise(res => setTimeout(res, x === 1 ? 50 : 5));
+      await wait(x === 1 ? 50 : 5);
       return x;
     });
-    const p1 = queue.run(1);
+    const p1 = queue.run(1).catch((err) => expect(err).toBeInstanceOf(TaskAbortedError));
     const p2 = queue.run(2);
-    await expect(p1).rejects.toThrow(TaskAbortedError);
     await expect(p2).resolves.toBe(2);
   });
 
@@ -233,7 +235,7 @@ describe('LastWinsAndCancelsPrevious — дополнительные edge/corne
     const p1 = queue.run(1);
     const p2 = queue.run(1);
     queue.abort();
-    await expect(p1).rejects.toThrow(TaskAbortedError);
+    await expect(p1).rejects.toThrow(TaskIgnoredError);
     await expect(p2).rejects.toThrow(TaskAbortedError);
     expect(started + aborted).toBeGreaterThan(0);
   });

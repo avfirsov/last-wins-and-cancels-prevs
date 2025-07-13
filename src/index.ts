@@ -80,6 +80,10 @@ export type onTaskStartedHook<Args extends any[]> = (params: {
   args: Args;
 }) => void;
 
+export type onTaskPlannedHook<Args extends any[]> = (params: {
+  args: Args;
+}) => void;
+
 type onTaskAbortedInternalHook = () => void;
 
 export type Unsub = () => void;
@@ -100,6 +104,16 @@ export class TaskIgnoredError extends Error {
   }
 }
 
+export class InnerError extends Error {
+  err: Error;
+  constructor(err: Error) {
+    super("Inner error");
+    this.name = "InnerError";
+    this.stack = err.stack;
+    this.err = err;
+  }
+}
+
 /**
  * Task queue with previous cancellation and event hooks support.
  */
@@ -110,9 +124,9 @@ export class LastWinsAndCancelsPrevious<
   private task: TaskFn<R, Args>;
   private leadingTaskController?: AbortController;
   private leadingTaskArgs?: Args;
-  private currentSeriesPromise!: Promise<R> | undefined;
+  private currentSeriesPromise!: Promise<R | InnerError> | undefined;
   private currentSeriesPromiseResolve?: (value: R) => void;
-  private currentSeriesPromiseReject?: (reason?: any) => void;
+  private currentSeriesPromiseReject?: (reason: any) => void;
 
   private readonly delay: number;
   private edge: "leading" | "trailing" | "both";
@@ -136,6 +150,7 @@ export class LastWinsAndCancelsPrevious<
   private onAbortedTaskFinishedHooks: OnAbortedTaskFinishedHook<R, Args>[] = [];
   private onTaskStartedHooks: onTaskStartedHook<Args>[] = [];
   private onTaskAbortedInternalHooks: onTaskAbortedInternalHook[] = [];
+  private onTaskPlannedHooks: onTaskPlannedHook<Args>[] = [];
 
   /**
    * Subscribe to abort events (any task, not just result)
@@ -287,6 +302,14 @@ export class LastWinsAndCancelsPrevious<
     };
   }
 
+  public onTaskPlanned(cb: onTaskPlannedHook<Args>): Unsub {
+    this.onTaskPlannedHooks.push(cb);
+    return () => {
+      const idx = this.onTaskPlannedHooks.indexOf(cb);
+      if (idx !== -1) this.onTaskPlannedHooks.splice(idx, 1);
+    };
+  }
+
   /**
    * Forcefully aborts the current winning task (and fires hooks)
    */
@@ -312,12 +335,11 @@ export class LastWinsAndCancelsPrevious<
 
     this.fireTaskAbortedInternal();
 
-    this.clearSeries(false);
+    this.currentSeriesPromiseReject?.(err);
     // Отменяем отложенные задачи (debounce/throttle)
     if (this.debouncedOrThrottledRun) {
       this.debouncedOrThrottledRun.cancel();
     }
-    this.currentSeriesPromiseReject?.(err);
   }
 
   /**
@@ -387,12 +409,45 @@ export class LastWinsAndCancelsPrevious<
     }
   }
 
-  private startSeries(args: Args, signal: AbortSignal) {
-    this.currentSeriesPromise = new Promise<R>((resolve, reject) => {
-      this.currentSeriesPromiseResolve = resolve;
-      this.currentSeriesPromiseReject = reject;
-    });
-    this.fireSeriesStarted(args, signal);
+  private clearSeries() {
+    this.currentSeriesPromiseResolve = undefined;
+    this.currentSeriesPromiseReject = undefined;
+    this.currentSeriesPromise = undefined;
+    this.leadingTaskArgs = undefined;
+    this.leadingTaskController = undefined;
+  }
+
+  private startSeries(startingArgs: Args, startingSignal: AbortSignal) {
+    const newPromise = new Promise<R>((resolve, reject) => {
+      this.currentSeriesPromiseResolve = (result: R) => {
+        // After successful completion — the series ends
+        this.fireSeriesSucceeded(
+          result,
+          this.leadingTaskController!.signal,
+          this.leadingTaskArgs!
+        );
+        resolve(result);
+        if (this.currentSeriesPromise !== newPromise) {
+          return;
+        }
+        this.clearSeries();
+      };
+      this.currentSeriesPromiseReject = (error: any) => {
+        // After error — the series ends
+        this.fireSeriesFailed(
+          error,
+          this.leadingTaskController!.signal,
+          this.leadingTaskArgs!
+        );
+        reject(error);
+        if (this.currentSeriesPromise !== newPromise) {
+          return;
+        }
+        this.clearSeries();
+      };
+    }).catch((err) => new InnerError(err));
+    this.currentSeriesPromise = newPromise;
+    this.fireSeriesStarted(startingArgs, startingSignal);
   }
 
   private fireSeriesStarted(args: Args, signal: AbortSignal) {
@@ -419,17 +474,12 @@ export class LastWinsAndCancelsPrevious<
     }
   }
 
-  private clearSeries(fallbackResolve?: boolean, fallbackResult?: any) {
-    this.leadingTaskController = undefined;
-    this.leadingTaskArgs = undefined;
-    if (fallbackResolve) {
-      this.currentSeriesPromiseResolve?.(fallbackResult);
-    } else {
-      this.currentSeriesPromiseReject?.(fallbackResult);
+  private fireTaskPlanned(args: Args) {
+    for (const cb of this.onTaskPlannedHooks) {
+      cb({
+        args,
+      });
     }
-    this.currentSeriesPromiseResolve = undefined;
-    this.currentSeriesPromiseReject = undefined;
-    this.currentSeriesPromise = undefined;
   }
 
   /**
@@ -506,34 +556,41 @@ export class LastWinsAndCancelsPrevious<
    * @returns Промис с результатом задачи или undefined, если задача не была запущена
    */
   public async run(...args: Args): Promise<R> {
+    this.fireTaskPlanned(args);
     if (!this.debouncedOrThrottledRun) {
       // No debounce/throttle — just call _run
       return this._run(args) as Promise<R>;
     }
+    //если запустили И edge === trailing | both, то все отложенные таски автоматически игнорятся
 
     const [resultPromise, _resolveResultPromise, _rejectResultPromise] =
       resolvablePromiseFromOutside<R>();
 
-    const nextTaskStartedPromise = this.nextTaskStartedPromise;
-
     //покрываем кейс когда текущий промис ушел в дефер, а в это время вызвали abort() => сняли деферед вызов => наши резолверы не будут вызваны
     //currentSeriesResult может быть undefined если серия еще не началась, когда эта таска ушла в дефер
     //а nextSeriesResult не заресолвиться если аборт случился пока не была начата серия
-    const unsub = this.onTaskAbortedInternal(() => {
+    const unsubTaskAbortedInternal = this.onTaskAbortedInternal(() => {
       this.fireTaskAborted(args);
-      _rejectResultPromise(new TaskAbortedError());
-      setTimeout(() => unsub(), 0);
+      rejectResultPromise(new TaskAbortedError());
     });
 
-    const resolveResultPromise = (result: R | PromiseLike<R>) => {
-      _resolveResultPromise(result);
-      setTimeout(() => unsub(), 0);
-    };
+    const cleanupCbs = [unsubTaskAbortedInternal];
+    //TODO: TEST WITHOUT SET TIMEOUT
+    function cleanup() {
+      // setTimeout(() => {
+      cleanupCbs.forEach((cb) => cb());
+      // }, 0);
+    }
 
-    const rejectResultPromise = (error: any) => {
+    function resolveResultPromise(result: R | PromiseLike<R>) {
+      _resolveResultPromise(result);
+      cleanup();
+    }
+
+    function rejectResultPromise(error: any) {
       _rejectResultPromise(error);
-      setTimeout(() => unsub(), 0);
-    };
+      cleanup();
+    }
     /**
      * debouncedOrThrottledRun может
      * - запустить задачу немедленно и вернуть промис
@@ -547,24 +604,17 @@ export class LastWinsAndCancelsPrevious<
      */
     const [thisTaskStartedPromise, resolveThisTaskStarted] =
       resolvablePromiseFromOutside<typeof startedTaskSymbol>();
+    let wasDeferred = true;
 
     const debouncedOrThrottledRunResult = this.debouncedOrThrottledRun!(
       args,
       () => {
+        wasDeferred = false;
         resolveThisTaskStarted(startedTaskSymbol);
       },
       resolveResultPromise,
       rejectResultPromise
     )?.catch(() => {});
-
-    //@startedTaskSymbol || undefined || Promise<R> для старого значения
-    //выполнение не было отложено только в первом случае
-    const thisTaskVsPrevTaskOrDeferRace = await Promise.race([
-      debouncedOrThrottledRunResult,
-      thisTaskStartedPromise,
-    ]);
-
-    const wasDeferred = thisTaskVsPrevTaskOrDeferRace !== startedTaskSymbol;
 
     if (!wasDeferred) {
       if (!debouncedOrThrottledRunResult) {
@@ -572,28 +622,26 @@ export class LastWinsAndCancelsPrevious<
           "debouncedOrThrottledRunResult is undefined although the task was not deferred"
         );
       }
-      resolveResultPromise(debouncedOrThrottledRunResult as Promise<R>);
       return resultPromise;
     }
 
     this.fireTaskDeferred(args);
 
+    // для leading edge любая deffered таска - автоматически ignored
     if (this.edge === "leading") {
       this.fireTaskIgnored(args);
       rejectResultPromise(new TaskIgnoredError());
       return resultPromise;
     }
 
-    Promise.race([nextTaskStartedPromise, thisTaskStartedPromise]).then(
-      (thisTaskVsNextTaskRace) => {
-        const wasIgnored = thisTaskVsNextTaskRace !== startedTaskSymbol;
+    //планирование любой таски отменяет любую дефферед таску
+    const unsubTaskPlanned = this.onTaskPlanned(() => {
+      this.fireTaskIgnored(args);
+      rejectResultPromise(new TaskIgnoredError());
+    });
 
-        if (wasIgnored) {
-          this.fireTaskIgnored(args);
-          rejectResultPromise(new TaskIgnoredError());
-        }
-      }
-    );
+    //предотвращаем утечки памяти
+    cleanupCbs.push(unsubTaskPlanned);
 
     return resultPromise;
   }
@@ -638,10 +686,7 @@ export class LastWinsAndCancelsPrevious<
         const result = await this.task(signal, ...args);
         if (!signal.aborted) {
           this.currentSeriesPromiseResolve?.(result);
-          // After successful completion — the series ends
-          this.fireSeriesSucceeded(result, signal, args);
           onTaskCompleted?.(result);
-          this.clearSeries(true, result);
           return result;
         }
         this.fireAbortedTaskFinished(signal, args, result);
@@ -650,11 +695,8 @@ export class LastWinsAndCancelsPrevious<
         throw error;
       } catch (err) {
         if (!signal.aborted) {
-          this.currentSeriesPromiseReject?.(err);
-          // After error — the series ends
-          this.fireSeriesFailed(err, signal, args);
-          this.clearSeries(false, err);
           onTaskFailed?.(err);
+          this.currentSeriesPromiseReject?.(err);
         }
         throw err;
       }
@@ -675,7 +717,9 @@ export class LastWinsAndCancelsPrevious<
    * @returns Promise<R> | undefined
    */
   public get currentSeriesResult(): Promise<R> | undefined {
-    return this.currentSeriesPromise;
+    return this.currentSeriesPromise?.then((val) =>
+      val instanceof InnerError ? Promise.reject(val.err) : val
+    );
   }
 
   private get nextTaskStartedPromise(): Promise<void> {

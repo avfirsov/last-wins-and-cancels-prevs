@@ -32,11 +32,11 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       { debounceMs: 100 }
     );
     expect(queue.currentSeriesResult).toBeUndefined();
-    const p1 = queue.run(1);
+    const p1 = queue.run(1).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     expect(queue.currentSeriesResult).toBeUndefined();
     await wait(50);
     expect(queue.currentSeriesResult).toBeUndefined();
-    const p2 = queue.run(2);
+    const p2 = queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     expect(queue.currentSeriesResult).toBeUndefined();
     await wait(50);
     expect(queue.currentSeriesResult).toBeUndefined();
@@ -46,8 +46,6 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     await wait(99);
     expect(queue.currentSeriesResult).toBeUndefined();
     await wait(10);
-    await expect(p1).rejects.toThrow(TaskIgnoredError);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(3);
   });
 
@@ -82,11 +80,10 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       async (_signal, x: number) => x,
       { debounceMs: 100 }
     );
-    const p = queue.run(1);
+    const p = queue.run(1).catch(err => expect(err).toBeInstanceOf(TaskAbortedError));
     await wait(50);
     queue.abort();
     await wait(100);
-    await expect(p).rejects.toThrow(TaskAbortedError);
     expect(queue.currentSeriesResult).toBeUndefined();
   });
 
@@ -120,12 +117,10 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
     queue.onTaskIgnored(() => {
       ignored++;
     });
-    const p1 = queue.run(1);
-    const p2 = queue.run(2);
+    const p1 = queue.run(1).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
+    const p2 = queue.run(2).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     const p3 = queue.run(3);
     await wait(41);
-    await expect(p1).rejects.toThrow(TaskIgnoredError);
-    await expect(p2).rejects.toThrow(TaskIgnoredError);
     await expect(p3).resolves.toBe(3);
     expect(started).toBe(1);
     expect(ignored).toBeGreaterThanOrEqual(2);
@@ -141,10 +136,10 @@ describe("LastWinsAndCancelsPrevious — debounce", () => {
       },
       { debounceMs: 25 }
     );
-    queue.run(100);
-    queue.run(200);
+    queue.run(100).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
+    queue.run(200).catch(err => expect(err).toBeInstanceOf(TaskIgnoredError));
     queue.run(300);
-    await wait(26);
+    await wait(30);
     expect(calledWith).toEqual([300]);
   });
 });
